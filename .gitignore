@@ -1,4 +1,5 @@
 /target
 /esp
+dump*
 OVMF_CODE.fd
 OVMF_VARS.fd

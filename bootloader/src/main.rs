@@ -9,7 +9,7 @@ use core::{
     ptr::{copy_nonoverlapping, slice_from_raw_parts_mut, write_bytes},
 };
 
-use bootloader::{BootInfo, FrameBufferConfig};
+use bootloader::{BootInfo, FrameBufferConfig, MemoryMap};
 use elflib::{Elf64, PT_LOAD};
 use log::info;
 use uefi::{
@@ -23,7 +23,7 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{AllocateType, BootServices, MemoryMap, MemoryType},
+    table::boot::{self, AllocateType, BootServices, MemoryType},
 };
 
 type EntryPoint = extern "sysv64" fn(BootInfo);
@@ -35,9 +35,14 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let (kernel_entry_point, boot_info) = {
         info!("Boot Start!");
         // Memory Map Load
-        let mut mmap_buf = [0u8; 4096 * 4];
         let bs = system_table.boot_services();
-        let memory_map = bs.memory_map(&mut mmap_buf).expect("Cannot Get Memory Map");
+        let mmap_size = bs.memory_map_size();
+        let mmap_byte = mmap_size.map_size + (mmap_size.entry_size * 5);
+        let mmap_buf = bs
+            .allocate_pool(MemoryType::RUNTIME_SERVICES_DATA, mmap_byte)
+            .unwrap();
+        let mmap_ref = unsafe { &mut *slice_from_raw_parts_mut(mmap_buf, mmap_byte) };
+        let memory_map = bs.memory_map(mmap_ref).expect("Cannot Get Memory Map");
         let mut root_dir = open_root_dir(bs);
         let mut mmap_file = root_dir
             .open(
@@ -124,6 +129,12 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
                     gop.frame_buffer().as_mut_ptr() as u64,
                     pixel_format,
                 ),
+                memory_map: MemoryMap {
+                    buffer_size: mmap_byte as u64,
+                    buffer: mmap_buf,
+                    map_size: mmap_size.map_size as u64,
+                    descriptor_size: mmap_size.entry_size as u64,
+                },
             },
         )
     };
@@ -147,7 +158,7 @@ fn open_root_dir(bs: &BootServices) -> Directory {
     fs.open_volume().unwrap()
 }
 
-fn save_memory_map(file: &mut RegularFile, memory_map: &MemoryMap) {
+fn save_memory_map(file: &mut RegularFile, memory_map: &boot::MemoryMap) {
     for (idx, entry) in memory_map.entries().enumerate() {
         let buf = format!(
             "{}, {:#?}, 0x{:08X}, {:X}, {:X}\n",

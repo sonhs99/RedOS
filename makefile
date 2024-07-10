@@ -6,15 +6,25 @@ build:
 
 run: build
 	qemu-system-x86_64 \
+    -m 512M \
     -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
     -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd \
     -drive format=raw,file=fat:rw:esp \
-    -usb \
-    -device virtio-tablet \
-    -device virtio-keyboard \
     -device qemu-xhci \
-	-device usb-mouse \
+    -device usb-kbd \
+    -device usb-mouse \
     -monitor stdio
+
+run-without-usb: build
+	qemu-system-x86_64 \
+    -m 512M \
+    -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
+    -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd \
+    -drive format=raw,file=fat:rw:esp \
+    -monitor stdio
+
+dump:
+	objdump -d ./target/x86_64/debug/kernel > dump.txt
 
 clean:
 	rm -rf target

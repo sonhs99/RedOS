@@ -1,9 +1,9 @@
-use crate::{
-    println,
-    sync::{Mutex, OnceLock},
-};
+pub mod search;
 
 use super::Port;
+use crate::sync::{Mutex, OnceLock};
+use log::debug;
+use search::{Base, Interface, PciSearcher, Sub};
 
 pub struct Pci {
     devices: [PciDevice; 32],
@@ -116,7 +116,7 @@ impl Pci {
 
         for func in 1..8 {
             if Self::read_vendor_id(bus, device, func) == 0xffff {
-                println!("{bus}.{device}.{func}");
+                debug!("{bus}.{device}.{func}");
                 continue;
             }
             self.scan_function(bus, device, func)?
@@ -154,8 +154,12 @@ impl Pci {
         Ok(())
     }
 
-    pub fn device_iter(&self) -> &[PciDevice] {
-        &self.devices[0..(self.num_device as usize)]
+    pub fn device_iter(&self) -> PciDeviceIterator {
+        PciDeviceIterator {
+            device: &self.devices[..(self.num_device as usize)],
+            index: 0,
+        }
+        // &self.devices[0..(self.num_device as usize)]
     }
 }
 
@@ -175,22 +179,13 @@ impl PciDevice {
     }
 
     pub fn read_bar(&self, offset: u8) -> u64 {
-        Pci::write_address(make_address(
-            self.bus,
-            self.dev,
-            self.func,
-            0x10 + offset * 4,
-        ));
+        let bar_addr = 0x10 + offset * 4;
+        Pci::write_address(make_address(self.bus, self.dev, self.func, bar_addr));
         let bar = Pci::read_data() as u64;
         if bar & 0x04 == 0 {
             bar
         } else {
-            Pci::write_address(make_address(
-                self.bus,
-                self.dev,
-                self.func,
-                0x10 + (offset + 4) * 4,
-            ));
+            Pci::write_address(make_address(self.bus, self.dev, self.func, bar_addr + 4));
             let upper_bar = Pci::read_data() as u64;
             bar | upper_bar << 32
         }
@@ -218,12 +213,59 @@ fn make_address(bus: u8, dev: u8, func: u8, addr: u8) -> u32 {
     1 << 31 | (bus as u32) << 16 | (dev as u32) << 11 | (func as u32) << 8 | (addr & 0xfc) as u32
 }
 
+pub struct PciDeviceIterator<'device> {
+    device: &'device [PciDevice],
+    index: usize,
+}
+
+impl<'device> Iterator for PciDeviceIterator<'device> {
+    type Item = PciDevice;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.device.get(self.index)?;
+        self.index += 1;
+        Some(*result)
+    }
+}
+
 static PCI_BUS: OnceLock<Mutex<Pci>> = OnceLock::new();
 
-pub fn init_pci() -> &'static Mutex<Pci> {
-    PCI_BUS.get_or_init(|| {
+pub fn init_pci() {
+    let pci = PCI_BUS.get_or_init(|| {
         let pci = Mutex::new(Pci::new());
         pci.lock().init().unwrap();
         pci
-    })
+    });
+
+    for dev in pci.lock().device_iter() {
+        let vendor_id = dev.read_vendor_id();
+        let class_code = dev.class_code;
+        debug!(
+            "Address {}.{}.{}: vend {:04X}, class {:02X}{:02X}{:02X}{:02X}, head {:02x}",
+            dev.bus,
+            dev.dev,
+            dev.func,
+            vendor_id,
+            class_code.base,
+            class_code.sub,
+            class_code.interface,
+            class_code.revision_id,
+            dev.header_type
+        );
+    }
+}
+
+pub fn switch_ehci_to_xhci(xhc_dev: &PciDevice) {
+    let intel_ehc_exist = PciSearcher::new()
+        .base(Base::Serial)
+        .sub(Sub::USB)
+        .interface(Interface::EHCI)
+        .search();
+    if let Some(_) = intel_ehc_exist {
+        let superspeed_port = Pci::read_config(&xhc_dev, 0xdc);
+        Pci::write_config(&xhc_dev, 0xd8, superspeed_port);
+        let ehci2xhci_ports = Pci::read_config(&xhc_dev, 0xd4);
+        Pci::write_config(&xhc_dev, 0xd0, ehci2xhci_ports);
+        debug!("switch_ehci_to_xhci: SS = {superspeed_port:02X}, xHCI = {ehci2xhci_ports:02X}")
+    }
 }

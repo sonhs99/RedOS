@@ -23,7 +23,7 @@ pub struct Console<'a> {
 pub struct ConsoleLogger;
 
 impl<'a> Console<'a> {
-    pub const Rows: usize = 25;
+    pub const Rows: usize = 49;
     pub const Columns: usize = 80;
     pub const fn new(
         writer: &'a GraphicWriter,
@@ -53,17 +53,18 @@ impl<'a> Console<'a> {
         match c {
             b'\n' => self.newline(),
             _ => {
-                if (self.cursor_column as usize) < (Console::Columns - 1) {
-                    write_ascii(
-                        self.writer,
-                        8 * self.cursor_column,
-                        16 * self.cursor_row,
-                        c,
-                        self.fg_color,
-                    );
-                    self.buffer[self.cursor_row as usize][self.cursor_column as usize] = c;
-                    self.cursor_column += 1
+                if self.cursor_column >= Console::Columns as u64 {
+                    self.newline();
                 }
+                write_ascii(
+                    self.writer,
+                    8 * self.cursor_column,
+                    16 * self.cursor_row,
+                    c,
+                    self.fg_color,
+                );
+                self.buffer[self.cursor_row as usize][self.cursor_column as usize] = c;
+                self.cursor_column += 1
             }
         }
     }
@@ -109,7 +110,7 @@ impl fmt::Write for Console<'_> {
 
 pub fn init_console(writer: &'static GraphicWriter, bg_color: PixelColor, fg_color: PixelColor) {
     CONSOLE.get_or_init(|| Mutex::new(Console::new(writer, bg_color, fg_color)));
-    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Info));
+    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug));
 }
 
 #[macro_export]
@@ -125,12 +126,12 @@ macro_rules! println {
 
 impl Log for ConsoleLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= Level::Info
+        metadata.level() <= Level::Trace
     }
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            println!("[{:5}]: {}", record.level(), record.args());
+            println!("[{:>5}]: {}", record.level(), record.args());
         }
     }
 
