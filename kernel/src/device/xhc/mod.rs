@@ -125,13 +125,6 @@ where
 
     pub fn process_event(&mut self) -> Option<Result<(), ()>> {
         if let Some(event_trb) = self.event_ring.read_event_trb() {
-            // match &event_trb {
-            //     EventTrb::Transfer { .. } => debug!("Transfer Event"),
-            //     EventTrb::PortStatusChange(_) => debug!("PortStatusChange Event"),
-            //     EventTrb::CommandCompletion(_) => debug!("CommandCompleteion Event"),
-            //     EventTrb::NotSupport { trb_type } => debug!("NotSupport Event"),
-            // }
-            // debug!("{event_trb:?}");///
             return Some(self.on_event(event_trb));
         }
         None

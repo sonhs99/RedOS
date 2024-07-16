@@ -23,6 +23,7 @@ use kernel::{
     font::write_ascii,
     gdt::init_gdt,
     graphic::{graphic, GraphicWriter, PixelColor},
+    interrupt::init_idt,
     page::init_page,
     print, println,
 };
@@ -42,6 +43,12 @@ fn kernel_main(boot_info: BootInfo) {
 
     init_gdt();
     info!("GDT Initialized");
+
+    init_idt();
+    info!("IDT Initialized");
+    debug!("Interrupt Test");
+    unsafe { asm!("int 3") };
+    debug!("Interrupt Test Success");
 
     init_page();
     info!("Page Table Initialized");

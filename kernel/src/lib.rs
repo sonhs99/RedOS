@@ -3,6 +3,7 @@
 #![feature(lazy_cell)]
 #![feature(generic_arg_infer)]
 #![feature(generic_nonzero)]
+#![feature(naked_functions)]
 
 extern crate alloc;
 

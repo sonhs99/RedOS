@@ -49,17 +49,20 @@ pub struct FrameBitmapManager {
 }
 
 impl FrameBitmapManager {
-    pub fn new(memory_map: &MemoryMap) -> Self {
-        let mut manager = Self {
+    pub fn new() -> Self {
+        Self {
             bitmap: [Bitmap::new(); FRAME_COUNT as usize / Bitmap::bits()],
             range_begin: FrameID(0),
             range_end: super::NULL_FRAME,
-        };
+        }
+    }
+
+    pub fn scan(&mut self, memory_map: &MemoryMap) {
         let mut avail_end = 0;
 
         for desc in memory_map.entries() {
             if avail_end < desc.physical_start {
-                manager.mark_alloc(
+                self.mark_alloc(
                     FrameID(avail_end / BYTE_PER_FRAME),
                     ((desc.physical_start - avail_end) / BYTE_PER_FRAME) as usize,
                 );
@@ -68,15 +71,14 @@ impl FrameBitmapManager {
             if is_available(desc) {
                 avail_end = physical_end;
             } else {
-                manager.mark_alloc(
+                self.mark_alloc(
                     FrameID(desc.physical_start / BYTE_PER_FRAME),
                     (desc.number_of_pages * BYTE_PER_FRAME) as usize / UEFI_PAGE_SIZE,
                 );
             }
         }
 
-        manager.set_range(FrameID(1), FrameID(avail_end / BYTE_PER_FRAME));
-        manager
+        self.set_range(FrameID(1), FrameID(avail_end / BYTE_PER_FRAME));
     }
 
     pub fn mark_alloc(&mut self, begin: FrameID, size: usize) {

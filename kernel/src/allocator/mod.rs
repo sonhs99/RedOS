@@ -41,8 +41,9 @@ static ALLOCATOR: OnceLock<Mutex<dump::DumpAllocator>> = OnceLock::new();
 static FRAME_MANAGER: OnceLock<Mutex<frame::FrameBitmapManager>> = OnceLock::new();
 
 pub fn init_heap(memory_map: &MemoryMap) {
-    FRAME_MANAGER.get_or_init(|| Mutex::new(frame::FrameBitmapManager::new(memory_map)));
-    let start = FRAME_MANAGER.lock().allocate(HEAP_FRAME_COUNT).unwrap();
+    let manager = FRAME_MANAGER.get_or_init(|| Mutex::new(frame::FrameBitmapManager::new()));
+    manager.lock().scan(memory_map);
+    let start = manager.lock().allocate(HEAP_FRAME_COUNT).unwrap();
     let end = FrameID(start.id() + HEAP_FRAME_COUNT as u64);
     ALLOCATOR.get_or_init(|| Mutex::new(dump::DumpAllocator::new(start, end)));
 }
