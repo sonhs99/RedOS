@@ -7,7 +7,7 @@ QEMU_USB := -device qemu-xhci \
     -device usb-kbd \
     -device usb-mouse \
 
-QEMU_TRACE := -d trace:apic_*
+QEMU_TRACE := -d trace:apic*
 
 build:
 	cargo -C ./kernel build --target x86_64.json --target-dir ../target -Z unstable-options
@@ -20,6 +20,9 @@ run: build
 
 run-without-usb: build
 	$(QEMU) -monitor stdio
+
+trace:
+	$(QEMU) $(QEMU_USB) $(QEMU_TRACE)
 
 dump:
 	objdump -d ./target/x86_64/debug/kernel > dump.txt

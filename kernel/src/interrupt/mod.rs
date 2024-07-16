@@ -1,3 +1,4 @@
+pub mod apic;
 mod handler;
 mod idt;
 
@@ -28,7 +29,7 @@ where
 
 #[repr(u8)]
 pub enum InterruptVector {
-    NULL,
+    XHCI = 0x40,
 }
 
 static IDT: OnceLock<EntryTable> = OnceLock::new();
@@ -46,6 +47,12 @@ pub fn init_idt() {
             .set_option(option);
         idt.set_handler(14, handler_with_err_code!(page_fault))
             .set_option(option);
+
+        idt.set_handler(
+            InterruptVector::XHCI as u8,
+            handler_without_err_code!(xhc_handler),
+        )
+        .set_option(option);
         idt
     });
 

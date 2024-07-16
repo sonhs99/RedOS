@@ -25,7 +25,7 @@ use log::{debug, info};
 use manager::{make_manager, Manager};
 use port::WaitingPort;
 use register::{
-    CapablitiyRegisterAccessible, ConfigRegisterAccessible, DoorbellRegisterAccessible,
+    CapabilityRegisterAccessible, ConfigRegisterAccessible, DoorbellRegisterAccessible,
     InterrupterSetRegisterAccessible, OperationalRegsisterAccessible, PortRegisterAccessible,
     RegisterOperation, UsbCommandRegisterAccessible, XhcRegisters,
 };

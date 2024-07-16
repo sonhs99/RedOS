@@ -7,7 +7,7 @@ use xhci::{
 };
 
 use super::{
-    super::allocator::Allocatable, CapablitiyRegisterAccessible, ConfigRegisterAccessible,
+    super::allocator::Allocatable, CapabilityRegisterAccessible, ConfigRegisterAccessible,
     DoorbellRegisterAccessible, InterrupterSetRegisterAccessible, OperationalRegsisterAccessible,
     PortRegisterAccessible, RegisterOperation, UsbCommandRegisterAccessible, XhcRegisters,
 };
@@ -99,7 +99,7 @@ impl ConfigRegisterAccessible for External {
     }
 }
 
-impl CapablitiyRegisterAccessible for External {
+impl CapabilityRegisterAccessible for External {
     fn max_scratchpad_buf_len(&self) -> usize {
         self.0
             .capability

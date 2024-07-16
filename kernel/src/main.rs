@@ -14,6 +14,7 @@ use kernel::{
         driver::keyboard::{getch, Keyboard},
         pci::{
             init_pci,
+            msi::{Message, Msi},
             search::{Base, Interface, PciSearcher, Sub},
             switch_ehci_to_xhci, Pci, PciDevice,
         },
@@ -23,7 +24,10 @@ use kernel::{
     font::write_ascii,
     gdt::init_gdt,
     graphic::{graphic, GraphicWriter, PixelColor},
-    interrupt::init_idt,
+    interrupt::{
+        apic::{LocalAPICId, LocalAPICRegisters},
+        init_idt, InterruptVector,
+    },
     page::init_page,
     print, println,
 };
@@ -67,16 +71,39 @@ fn kernel_main(boot_info: BootInfo) {
         .expect("No xHC device detected")
         .first()
     {
-        Some(dev) => {
-            info!("xHC has been found: {}.{}.{}", dev.bus, dev.dev, dev.func);
-            let xhc_bar = dev.read_bar(0);
+        Some(xhc_dev) => {
+            info!(
+                "xHC has been found: {}.{}.{}",
+                xhc_dev.bus, xhc_dev.dev, xhc_dev.func
+            );
+            let xhc_bar = xhc_dev.read_bar(0);
             info!("Read BAR0: 0x{xhc_bar:016X}");
             let xhc_mmio_base = xhc_bar & (!0xfu64);
             info!("xHC MMIO base: 0x{xhc_mmio_base:016X}");
 
-            if dev.read_vendor_id() == 0x8086 {
-                switch_ehci_to_xhci(&dev);
+            if xhc_dev.read_vendor_id() == 0x8086 {
+                switch_ehci_to_xhci(&xhc_dev);
             }
+
+            let lapic_id = LocalAPICRegisters::default().local_apic_id().id();
+            let msg = Message::new()
+                .destionation_id(lapic_id)
+                .interrupt_index(InterruptVector::XHCI as u8)
+                .level(true)
+                .trigger_mode(true)
+                .delivery_mode(0);
+            xhc_dev.capabilities().for_each(|cap| {
+                debug!("Capability ID={:?}", cap.id());
+                if let Some(msi) = cap.msi() {
+                    debug!("MSI Initialize Start");
+                    msi.enable(&msg);
+                    debug!("MSI Initialize Success");
+                } else if let Some(msi) = cap.msix() {
+                    debug!("MSI-X Initialize Start");
+                    msi.enable(&msg);
+                    debug!("MSI-X Initialize Success");
+                }
+            });
 
             let mut allocator = Allocator::new();
             let keyboard = Keyboard::new();
@@ -84,9 +111,9 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc::Controller::new(xhc_mmio_base, allocator, vec![Box::new(keyboard.usb())])
                     .unwrap();
             xhc.reset_port().expect("xHCI Port Reset Failed");
-            info!("xHCI Pooling Start");
+            // info!("xHCI Pooling Start");
 
-            xhc.start_event_pooling();
+            // xhc.start_event_pooling();
         }
         None => {}
     }

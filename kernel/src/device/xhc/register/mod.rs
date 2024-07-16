@@ -21,7 +21,7 @@ pub trait ConfigRegisterAccessible {
     fn write_max_device_slots(&mut self, max_slots: u8) -> Result<(), ()>;
 }
 
-pub trait CapablitiyRegisterAccessible {
+pub trait CapabilityRegisterAccessible {
     fn max_scratchpad_buf_len(&self) -> usize;
     fn request_ownership(&mut self, mmio_base: u64);
 }
@@ -99,7 +99,7 @@ pub trait InterrupterSetRegisterAccessible {
 pub trait XhcRegisters:
     RegisterOperation
     + ConfigRegisterAccessible
-    + CapablitiyRegisterAccessible
+    + CapabilityRegisterAccessible
     + DoorbellRegisterAccessible
     + PortRegisterAccessible
     + OperationalRegsisterAccessible

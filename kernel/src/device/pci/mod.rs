@@ -1,7 +1,10 @@
+pub mod capability;
+pub mod msi;
 pub mod search;
 
 use super::Port;
 use crate::sync::{Mutex, OnceLock};
+use capability::{CapabilityRegister, CapabilityRegisterIter};
 use log::debug;
 use search::{Base, Interface, PciSearcher, Sub};
 
@@ -188,6 +191,15 @@ impl PciDevice {
             Pci::write_address(make_address(self.bus, self.dev, self.func, bar_addr + 4));
             let upper_bar = Pci::read_data() as u64;
             bar | upper_bar << 32
+        }
+    }
+
+    pub fn capabilities(&self) -> CapabilityRegisterIter {
+        let offset = Pci::read_config(self, 0x34) as u8;
+        debug!("Capability offset={offset:#02X}");
+        CapabilityRegisterIter {
+            device: self,
+            offset,
         }
     }
 }
