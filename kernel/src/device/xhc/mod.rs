@@ -18,20 +18,22 @@ use core::{
 };
 
 use alloc::{boxed::Box, rc::Rc, vec::Vec};
-use allocator::Allocatable;
+use allocator::{Allocatable, Allocator};
 use driver::ClassDriverOperate;
 use event::TargetEvent;
 use log::{debug, info};
 use manager::{make_manager, Manager};
 use port::WaitingPort;
 use register::{
-    CapabilityRegisterAccessible, ConfigRegisterAccessible, DoorbellRegisterAccessible,
+    CapabilityRegisterAccessible, ConfigRegisterAccessible, DoorbellRegisterAccessible, External,
     InterrupterSetRegisterAccessible, OperationalRegsisterAccessible, PortRegisterAccessible,
     RegisterOperation, UsbCommandRegisterAccessible, XhcRegisters,
 };
 use ring::{make_command_ring, make_event_ring, CommandRing, EventRing, EventTrb};
 use trb::TrbRaw;
 use xhci::ring::trb::event::{CommandCompletion, PortStatusChange, TransferEvent};
+
+use crate::sync::{Mutex, OnceLock};
 
 const DEVICE_SIZE: usize = 8;
 
@@ -221,4 +223,10 @@ where
         }
         Ok(())
     }
+}
+
+pub static XHC: OnceLock<Mutex<Controller<External, Allocator>>> = OnceLock::new();
+
+pub fn regist_controller(xhc: Controller<External, Allocator>) {
+    XHC.get_or_init(|| Mutex::new(xhc));
 }

@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{interrupt::apic::LocalAPICRegisters, println};
+use crate::{device::xhc::XHC, interrupt::apic::LocalAPICRegisters, println};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -114,6 +114,9 @@ pub fn break_point(stack_frame: &ExceptionStackFrame) {
 }
 
 pub fn xhc_handler(stack_frame: &ExceptionStackFrame) {
-    println!("[INTER]: xHC Interrupt");
+    // println!("[INTER]: xHC Interrupt");
+    if let Some(xhc) = XHC.get() {
+        let _ = xhc.lock().process_all_event();
+    }
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
