@@ -15,8 +15,8 @@ dyn-clone = "1.0.17"
 
 [profile.dev]
 panic = "abort"
-opt-level = 2
+opt-level = 3
 
 [profile.release]
 panic = "abort"
-opt-level = 2
+opt-level = 3

@@ -22,10 +22,10 @@ impl Keyboard {
 
     pub fn usb(&self) -> USBKeyboardDriver {
         USBKeyboardDriver::new(|u8, key| unsafe {
-            // QUEUE.lock().enqueue(key);
-            if let Key::Ascii(byte) = key {
-                print!("{}", byte as char);
-            }
+            QUEUE.lock().enqueue(key);
+            // if let Key::Ascii(byte) = key {
+            //     print!("{}", byte as char);
+            // }
         })
     }
 }

@@ -25,8 +25,8 @@ use kernel::{
     gdt::init_gdt,
     graphic::{graphic, GraphicWriter, PixelColor},
     interrupt::{
-        apic::{LocalAPICId, LocalAPICRegisters},
-        init_idt, without_interrupt, InterruptVector,
+        apic::{APICTimerMode, LocalAPICId, LocalAPICRegisters},
+        init_idt, set_interrupt, without_interrupts, InterruptVector,
     },
     page::init_page,
     print, println,
@@ -36,6 +36,7 @@ use log::{debug, info, trace, warn};
 entry_point!(kernel_main);
 
 fn kernel_main(boot_info: BootInfo) {
+    set_interrupt(false);
     let (height, width) = boot_info.frame_config.resolution();
 
     let pixel_writer = graphic(boot_info.frame_config);
@@ -49,10 +50,15 @@ fn kernel_main(boot_info: BootInfo) {
     info!("GDT Initialized");
 
     init_idt();
+    set_interrupt(true);
     info!("IDT Initialized");
-    debug!("Interrupt Test");
-    unsafe { asm!("int 3") };
-    debug!("Interrupt Test Success");
+
+    // LocalAPICRegisters::default().apic_timer().init(
+    //     0b1011,
+    //     false,
+    //     APICTimerMode::Periodic,
+    //     InterruptVector::APICTimer as u8,
+    // );
 
     init_page();
     info!("Page Table Initialized");
@@ -85,7 +91,7 @@ fn kernel_main(boot_info: BootInfo) {
                 switch_ehci_to_xhci(&xhc_dev);
             }
 
-            without_interrupt(|| {
+            without_interrupts(|| {
                 let lapic_id = LocalAPICRegisters::default().local_apic_id().id();
                 let msg = Message::new()
                     .destionation_id(lapic_id)
@@ -116,5 +122,8 @@ fn kernel_main(boot_info: BootInfo) {
             });
         }
         None => {}
+    }
+    loop {
+        print!("{}", getch() as char);
     }
 }

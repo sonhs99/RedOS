@@ -1,35 +1,22 @@
 pub mod apic;
+pub mod asm;
 mod handler;
 mod idt;
-
-use core::arch::asm;
 
 use handler::*;
 use idt::{EntryOptions, EntryTable};
 
-use crate::{handler_with_err_code, handler_without_err_code, sync::OnceLock};
+use crate::{
+    handler_with_context, handler_with_err_code, handler_without_err_code, sync::OnceLock,
+};
+use core::arch::asm;
 
-pub fn cli() {
-    unsafe { asm!("cli") };
-}
-
-pub fn sti() {
-    unsafe { asm!("sti") };
-}
-
-pub fn without_interrupt<F, T>(mut inner: F) -> T
-where
-    F: FnMut() -> T,
-{
-    cli();
-    let result = inner();
-    sti();
-    result
-}
+pub use asm::{set_interrupt, without_interrupts};
 
 #[repr(u8)]
 pub enum InterruptVector {
     XHCI = 0x40,
+    APICTimer = 0x41,
 }
 
 static IDT: OnceLock<EntryTable> = OnceLock::new();
@@ -37,13 +24,22 @@ static IDT: OnceLock<EntryTable> = OnceLock::new();
 pub fn init_idt() {
     IDT.get_or_init(|| {
         let mut idt = EntryTable::new();
-        let option = EntryOptions::new().set_dpl(0).set_stack_index(0);
+        let option = EntryOptions::new().set_dpl(0).set_stack_index(1);
+
+        for i in 0..16 {
+            idt.set_handler(i, handler_without_err_code!(common_exception))
+                .set_option(option);
+        }
 
         idt.set_handler(0, handler_without_err_code!(divided_by_zero))
             .set_option(option);
         idt.set_handler(3, handler_without_err_code!(break_point))
             .set_option(option);
         idt.set_handler(6, handler_without_err_code!(invalid_opcode))
+            .set_option(option);
+        idt.set_handler(8, handler_with_err_code!(double_fault))
+            .set_option(option);
+        idt.set_handler(13, handler_with_err_code!(general_protection))
             .set_option(option);
         idt.set_handler(14, handler_with_err_code!(page_fault))
             .set_option(option);
@@ -53,6 +49,12 @@ pub fn init_idt() {
             handler_without_err_code!(xhc_handler),
         )
         .set_option(option);
+        idt.set_handler(
+            InterruptVector::APICTimer as u8,
+            handler_with_context!(apic_timer_handler),
+        )
+        .set_option(option);
+
         idt
     });
 

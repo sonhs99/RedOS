@@ -17,6 +17,7 @@ pub mod interrupt;
 pub mod page;
 mod queue;
 pub mod sync;
+pub mod task;
 
 use core::panic::PanicInfo;
 use log::error;
@@ -25,17 +26,32 @@ use log::error;
 macro_rules! entry_point {
     ($path:path) => {
         const _: () = {
-            // #[repr(align(16))]
-            // struct KernelStack([u8; 1024 * 1024]);
+            const KERNEL_STACK: KernelStack = KernelStack::new();
 
-            // static KERNEL_STACK: KernelStack = KernelStack([0u8; 1024 * 1024]);
+            #[repr(C, align(16))]
+            struct KernelStack([u8; 0x100000]);
+
+            impl KernelStack {
+                #[inline(always)]
+                const fn new() -> Self {
+                    Self([0; 0x100000])
+                }
+
+                #[inline(always)]
+                pub fn end_addr(&self) -> u64 {
+                    self.0.as_ptr() as u64 + 0x200000
+                }
+            }
+
             #[export_name = "_start"]
-            pub unsafe extern "C" fn __impl_start(boot_info: BootInfo) -> ! {
-                // let boot = boot_info.clone();
+            pub unsafe extern "sysv64" fn __impl_start(boot_info: BootInfo) -> ! {
+                use core::arch::asm;
                 let f: fn(BootInfo) = $path;
-                // asm!("mov rsp, {}", in(reg) &KERNEL_STACK.0[1024 * 1024 - 1] as *const u8 as u64);
-                // asm!("mov rbp, {}", in(reg) &KERNEL_STACK.0[1024 * 1024 - 1] as *const u8 as u64);
+                let stack_start_addr = KERNEL_STACK.end_addr();
+
+        asm!("mov rsp, {0}", in(reg) stack_start_addr);
                 f(boot_info);
+
                 loop {
                     asm!("hlt");
                 }

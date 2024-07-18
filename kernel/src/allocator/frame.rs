@@ -1,6 +1,7 @@
 use core::mem::size_of;
 
 use bootloader::{MemoryDescriptor, MemoryMap, MemoryType};
+use log::debug;
 
 use super::{FrameID, BYTE_PER_FRAME, FRAME_COUNT};
 use crate::page::UEFI_PAGE_SIZE;

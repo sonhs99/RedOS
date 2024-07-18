@@ -1,9 +1,13 @@
-use crate::sync::{Mutex, OnceLock};
+use crate::{
+    println,
+    sync::{Mutex, OnceLock},
+};
 use bootloader::MemoryMap;
 use core::alloc::{GlobalAlloc, Layout};
 
 pub mod dump;
 pub mod frame;
+pub mod slab;
 
 const KiB: u64 = 1024;
 const MiB: u64 = KiB * 1024;
