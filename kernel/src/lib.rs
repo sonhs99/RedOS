@@ -39,7 +39,7 @@ macro_rules! entry_point {
 
                 #[inline(always)]
                 pub fn end_addr(&self) -> u64 {
-                    self.0.as_ptr() as u64 + 0x200000
+                    self.0.as_ptr() as u64 + 0x100000
                 }
             }
 

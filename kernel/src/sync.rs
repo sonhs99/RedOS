@@ -4,6 +4,8 @@ use core::ops::{Deref, DerefMut};
 use core::panic;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use log::debug;
+
 pub struct Mutex<T> {
     inner: UnsafeCell<T>,
     status: AtomicBool,

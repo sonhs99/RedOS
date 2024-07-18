@@ -4,6 +4,7 @@ use crate::{
 };
 use bootloader::MemoryMap;
 use core::alloc::{GlobalAlloc, Layout};
+use log::debug;
 
 pub mod dump;
 pub mod frame;

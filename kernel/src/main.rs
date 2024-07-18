@@ -53,12 +53,12 @@ fn kernel_main(boot_info: BootInfo) {
     set_interrupt(true);
     info!("IDT Initialized");
 
-    // LocalAPICRegisters::default().apic_timer().init(
-    //     0b1011,
-    //     false,
-    //     APICTimerMode::Periodic,
-    //     InterruptVector::APICTimer as u8,
-    // );
+    LocalAPICRegisters::default().apic_timer().init(
+        0b1011,
+        false,
+        APICTimerMode::Periodic,
+        InterruptVector::APICTimer as u8,
+    );
 
     init_page();
     info!("Page Table Initialized");
