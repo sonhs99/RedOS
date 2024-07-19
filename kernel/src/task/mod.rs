@@ -1,3 +1,18 @@
+mod manager;
+pub mod scheduler;
+
+use core::ptr::NonNull;
+
+use manager::TaskManager;
+use scheduler::{rr::RoundRobinScheduler, Schedulable};
+
+use crate::{
+    interrupt::without_interrupts,
+    println,
+    queue::Node,
+    sync::{Mutex, OnceLock},
+};
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Task {
@@ -5,6 +20,13 @@ pub struct Task {
 
     id: u64,
     flags: u64,
+
+    next: Option<NonNull<Task>>,
+    prev: Option<NonNull<Task>>,
+
+    parent: Option<NonNull<Task>>,
+    child: Option<NonNull<Task>>,
+    sibling: Option<NonNull<Task>>,
 
     stack_addr: u64,
     stack_size: u64,
@@ -34,6 +56,11 @@ impl Task {
             flags,
             stack_addr,
             stack_size,
+            next: None,
+            prev: None,
+            parent: None,
+            child: None,
+            sibling: None,
         }
     }
 
@@ -48,23 +75,44 @@ impl Task {
             flags: 0,
             stack_addr: 0,
             stack_size: 0,
+            next: None,
+            prev: None,
+            parent: None,
+            child: None,
+            sibling: None,
         }
+    }
+
+    pub fn child(&mut self) -> &mut Option<NonNull<Task>> {
+        &mut self.next
+    }
+
+    pub fn sibling(&mut self) -> &mut Option<NonNull<Task>> {
+        &mut self.prev
+    }
+
+    pub fn parent(&mut self) -> &mut Option<NonNull<Task>> {
+        &mut self.parent
     }
 }
 
-const TASK_REGISTER_COUNT: usize = 5 + 19;
+impl Node for Task {
+    fn next(&self) -> Option<NonNull<Task>> {
+        self.next
+    }
 
-const CONTEXT_SS: usize = 23;
-const CONTEXT_RSP: usize = 22;
-const CONTEXT_RFLAGS: usize = 21;
-const CONTEXT_CS: usize = 20;
-const CONTEXT_RIP: usize = 19;
-const CONTEXT_RBP: usize = 18;
+    fn prev(&self) -> Option<NonNull<Task>> {
+        self.prev
+    }
 
-const CONTEXT_DS: usize = 3;
-const CONTEXT_ES: usize = 2;
-const CONTEXT_FS: usize = 1;
-const CONTEXT_GS: usize = 0;
+    fn set_next(&mut self, node: Option<NonNull<Task>>) {
+        self.next = node;
+    }
+
+    fn set_prev(&mut self, node: Option<NonNull<Task>>) {
+        self.prev = node;
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C, packed(16))]
@@ -220,4 +268,66 @@ extern "sysv64" fn context_switch(current: &Context, next: &Context) {
             options(noreturn)
         )
     };
+}
+
+const STACK_SIZE: usize = 0x2000;
+
+static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
+static TASK_STACK: [[u8; STACK_SIZE]; 1024] = [[0; STACK_SIZE]; 1024];
+static SCHEDULER: OnceLock<Mutex<RoundRobinScheduler>> = OnceLock::new();
+
+pub fn schedule() {
+    let _ = without_interrupts(|| {
+        let mut scheduler = SCHEDULER.get()?.lock();
+        let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
+        let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
+        scheduler.push_task(running_task);
+        scheduler.set_running_task(next_task);
+        running_task.context().switch_to(next_task.context());
+        scheduler.reset_tick();
+        Some(())
+    });
+}
+
+pub fn schedule_int(context: &mut Context) {
+    without_interrupts(|| {
+        let mut scheduler = SCHEDULER.get()?.lock();
+        let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
+        let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
+        println!("{} -> {}", running_task.id, next_task.id);
+        scheduler.push_task(running_task);
+        scheduler.set_running_task(next_task);
+        running_task.context = *context;
+        *context = next_task.context;
+        scheduler.reset_tick();
+        Some(())
+    });
+}
+
+pub fn is_expired() -> bool {
+    SCHEDULER.lock().is_expired()
+}
+
+pub fn decrease_tick() {
+    SCHEDULER.lock().tick();
+}
+
+pub fn init_task() {
+    let mut manager = TASK_MANAGER
+        .get_or_init(|| Mutex::new(TaskManager::new()))
+        .lock();
+    let scheduler = SCHEDULER.get_or_init(|| Mutex::new(RoundRobinScheduler::new()));
+    let task = manager.allocate().unwrap();
+    scheduler.lock().set_running_task(task);
+}
+
+pub fn create_task(flag: u64, entry_point: u64) -> Result<(), ()> {
+    let mut manager = TASK_MANAGER.lock();
+    let task = manager.allocate()?;
+
+    let stack_addr = TASK_STACK[task.id as usize].as_ptr() as u64;
+    *task = Task::new(task.id, flag, entry_point, stack_addr, STACK_SIZE as u64);
+
+    SCHEDULER.lock().push_task(task);
+    Ok(())
 }

@@ -1,6 +1,11 @@
 use core::arch::asm;
 
-use crate::{device::xhc::XHC, interrupt::apic::LocalAPICRegisters, println, task::Context};
+use crate::{
+    device::xhc::XHC,
+    interrupt::apic::LocalAPICRegisters,
+    println,
+    task::{decrease_tick, is_expired, schedule_int, Context},
+};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -256,7 +261,7 @@ pub extern "C" fn double_fault(stack_frame: &ExceptionStackFrame, error_code: u6
 }
 
 pub extern "C" fn general_protection(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    println!("[EXCEP]: GENERAL_PROTECTION_FAULT at {error_code}\n{stack_frame:#X?}");
+    println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
     loop {}
 }
 
@@ -274,7 +279,10 @@ pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 
-pub extern "C" fn apic_timer_handler(current_context: &Context) {
-    println!("[INTER]: TIMER");
+pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
+    decrease_tick();
+    if is_expired() {
+        schedule_int(current_context);
+    }
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }

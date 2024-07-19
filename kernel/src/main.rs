@@ -30,6 +30,7 @@ use kernel::{
     },
     page::init_page,
     print, println,
+    task::{create_task, init_task},
 };
 use log::{debug, info, trace, warn};
 
@@ -53,6 +54,15 @@ fn kernel_main(boot_info: BootInfo) {
     set_interrupt(true);
     info!("IDT Initialized");
 
+    init_page();
+    info!("Page Table Initialized");
+
+    init_heap(&boot_info.memory_map);
+    info!("Heap Initialized");
+
+    init_task();
+    info!("Task Management Initialized");
+
     LocalAPICRegisters::default().apic_timer().init(
         0b1011,
         false,
@@ -60,12 +70,7 @@ fn kernel_main(boot_info: BootInfo) {
         InterruptVector::APICTimer as u8,
     );
 
-    init_page();
-    info!("Page Table Initialized");
-
-    init_heap(&boot_info.memory_map);
-    info!("Heap Initialized");
-
+    info!("Enable APIC Timer Interrupt");
     info!("PCI Init Started");
     init_pci();
 
@@ -120,10 +125,21 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
+            create_task(0, print_input as u64);
         }
         None => {}
     }
+    create_task(0, print_a as u64);
+}
+
+fn print_input() {
     loop {
         print!("{}", getch() as char);
+    }
+}
+
+fn print_a() {
+    loop {
+        print!("a");
     }
 }
