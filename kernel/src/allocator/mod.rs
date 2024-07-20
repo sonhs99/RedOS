@@ -53,6 +53,10 @@ pub fn init_heap(memory_map: &MemoryMap) {
     ALLOCATOR.get_or_init(|| Mutex::new(dump::DumpAllocator::new(start, end)));
 }
 
+pub fn malloc(size: usize, align: usize) -> *mut u8 {
+    unsafe { ALLOCATOR.alloc(Layout::from_size_align(size, align).unwrap()) }
+}
+
 fn align(base: u64, align: u64) -> u64 {
     if align == 0 {
         base

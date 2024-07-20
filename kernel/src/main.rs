@@ -30,7 +30,7 @@ use kernel::{
     },
     page::init_page,
     print, println,
-    task::{create_task, init_task},
+    task::{create_task, init_task, schedule},
 };
 use log::{debug, info, trace, warn};
 
@@ -125,20 +125,20 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
-            create_task(0, print_input as u64);
+            create_task(0, task1 as u64);
         }
         None => {}
     }
-    create_task(0, print_a as u64);
+    create_task(0, task2 as u64);
 }
 
-fn print_input() {
+fn task1() {
     loop {
         print!("{}", getch() as char);
     }
 }
 
-fn print_a() {
+fn task2() {
     loop {
         print!("a");
     }

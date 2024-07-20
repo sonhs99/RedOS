@@ -7,10 +7,12 @@ use manager::TaskManager;
 use scheduler::{rr::RoundRobinScheduler, Schedulable};
 
 use crate::{
+    allocator::malloc,
     interrupt::without_interrupts,
     println,
     queue::Node,
     sync::{Mutex, OnceLock},
+    KernelStack,
 };
 
 #[derive(Clone, Copy)]
@@ -273,7 +275,7 @@ extern "sysv64" fn context_switch(current: &Context, next: &Context) {
 const STACK_SIZE: usize = 0x2000;
 
 static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
-static TASK_STACK: [[u8; STACK_SIZE]; 1024] = [[0; STACK_SIZE]; 1024];
+static TASK_STACK: OnceLock<u64> = OnceLock::new();
 static SCHEDULER: OnceLock<Mutex<RoundRobinScheduler>> = OnceLock::new();
 
 pub fn schedule() {
@@ -283,6 +285,7 @@ pub fn schedule() {
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
         scheduler.push_task(running_task);
         scheduler.set_running_task(next_task);
+        // println!("schedule {} -> {}", running_task.id, next_task.id);
         running_task.context().switch_to(next_task.context());
         scheduler.reset_tick();
         Some(())
@@ -290,11 +293,11 @@ pub fn schedule() {
 }
 
 pub fn schedule_int(context: &mut Context) {
-    without_interrupts(|| {
+    let _ = without_interrupts(|| {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
-        println!("{} -> {}", running_task.id, next_task.id);
+        // println!("schedule_int {} -> {}", running_task.id, next_task.id);
         scheduler.push_task(running_task);
         scheduler.set_running_task(next_task);
         running_task.context = *context;
@@ -317,6 +320,7 @@ pub fn init_task() {
         .get_or_init(|| Mutex::new(TaskManager::new()))
         .lock();
     let scheduler = SCHEDULER.get_or_init(|| Mutex::new(RoundRobinScheduler::new()));
+    TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 8) as u64);
     let task = manager.allocate().unwrap();
     scheduler.lock().set_running_task(task);
 }
@@ -324,8 +328,10 @@ pub fn init_task() {
 pub fn create_task(flag: u64, entry_point: u64) -> Result<(), ()> {
     let mut manager = TASK_MANAGER.lock();
     let task = manager.allocate()?;
+    // println!("alloc {}", task.id);
 
-    let stack_addr = TASK_STACK[task.id as usize].as_ptr() as u64;
+    let stack_addr = TASK_STACK.get().unwrap() + 8192 * task.id;
+    // println!("stack_addr: {:X}", stack_addr);
     *task = Task::new(task.id, flag, entry_point, stack_addr, STACK_SIZE as u64);
 
     SCHEDULER.lock().push_task(task);

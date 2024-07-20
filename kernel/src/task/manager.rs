@@ -2,7 +2,7 @@ use core::ptr::NonNull;
 
 use crate::queue::ListQueue;
 
-use super::Task;
+use super::{Context, Task};
 
 const TASKPOOL_SIZE: usize = 1024;
 pub struct TaskManager {
@@ -41,6 +41,7 @@ impl TaskManager {
         task.parent = None;
         task.child = None;
         task.sibling = None;
+        task.context = Context::empty();
         self.empty_queue.push(NonNull::new(task).unwrap());
         self.use_count -= 1;
     }

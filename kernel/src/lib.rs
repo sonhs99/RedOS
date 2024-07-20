@@ -22,26 +22,37 @@ pub mod task;
 use core::panic::PanicInfo;
 use log::error;
 
+#[repr(C, align(16))]
+pub struct KernelStack<const N: usize>([u8; N]);
+
+impl<const N: usize> KernelStack<N> {
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self([0; N])
+    }
+
+    #[inline(always)]
+    pub fn end_addr(&self) -> u64 {
+        self.0.as_ptr() as u64 + N as u64
+    }
+
+    #[inline(always)]
+    pub fn start_addr(&self) -> u64 {
+        self.0.as_ptr() as u64
+    }
+
+    #[inline(always)]
+    pub fn size() -> usize {
+        N
+    }
+}
+
 #[macro_export]
 macro_rules! entry_point {
     ($path:path) => {
         const _: () = {
-            const KERNEL_STACK: KernelStack = KernelStack::new();
-
-            #[repr(C, align(16))]
-            struct KernelStack([u8; 0x100000]);
-
-            impl KernelStack {
-                #[inline(always)]
-                const fn new() -> Self {
-                    Self([0; 0x100000])
-                }
-
-                #[inline(always)]
-                pub fn end_addr(&self) -> u64 {
-                    self.0.as_ptr() as u64 + 0x100000
-                }
-            }
+            use kernel::KernelStack;
+            const KERNEL_STACK: KernelStack<0x100000> = KernelStack::new();
 
             #[export_name = "_start"]
             pub unsafe extern "sysv64" fn __impl_start(boot_info: BootInfo) -> ! {
