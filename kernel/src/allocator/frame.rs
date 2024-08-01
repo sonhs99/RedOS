@@ -69,12 +69,18 @@ impl FrameBitmapManager {
                 );
             }
             let physical_end = desc.physical_start + desc.number_of_pages * UEFI_PAGE_SIZE as u64;
+            // debug!("{:?}: {}", desc.type_, is_available(desc));
             if is_available(desc) {
                 avail_end = physical_end;
             } else {
+                // debug!(
+                //     "mark: {:#X} - {:#X}",
+                //     desc.physical_start,
+                //     desc.number_of_pages as usize * UEFI_PAGE_SIZE
+                // );
                 self.mark_alloc(
                     FrameID(desc.physical_start / BYTE_PER_FRAME),
-                    (desc.number_of_pages * BYTE_PER_FRAME) as usize / UEFI_PAGE_SIZE,
+                    (desc.number_of_pages as usize * UEFI_PAGE_SIZE) / BYTE_PER_FRAME as usize,
                 );
             }
         }
@@ -83,7 +89,7 @@ impl FrameBitmapManager {
     }
 
     pub fn mark_alloc(&mut self, begin: FrameID, size: usize) {
-        for frame in 0..begin.id() {
+        for frame in begin.id()..size as u64 {
             self.set_bitmap(FrameID(frame), true).unwrap();
         }
     }
@@ -96,16 +102,17 @@ impl FrameBitmapManager {
     pub fn allocate(&mut self, size: usize) -> Result<FrameID, ()> {
         let mut count = 0u64;
         let mut base = self.range_begin.id();
-        while base <= self.range_end.id() {
+        while base + count <= self.range_end.id() {
             if count == size as u64 {
                 let frame = FrameID(base);
                 self.mark_alloc(frame, size);
                 return Ok(frame);
             }
-            if !self.get_bitmap(FrameID(base + count))? {
+            if self.get_bitmap(FrameID(base + count))? {
                 base += count + 1;
                 count = 0;
             } else {
+                // debug!("{base} -> {count}");
                 count += 1;
             }
         }
@@ -128,7 +135,7 @@ impl FrameBitmapManager {
     fn get_bitmap(&mut self, frame: FrameID) -> Result<bool, ()> {
         let bitmap_idx = frame.id() as usize / Bitmap::bits();
         let bit_idx = frame.id() as usize % Bitmap::bits();
-        (self.bitmap[bitmap_idx]).get(bit_idx as u8)
+        self.bitmap[bitmap_idx].get(bit_idx as u8)
     }
 }
 

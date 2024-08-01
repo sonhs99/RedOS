@@ -1,4 +1,5 @@
-/target
+*target
+bootloader/target
 /esp
 dump.txt
 OVMF_CODE.fd

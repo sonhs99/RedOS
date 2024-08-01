@@ -1,5 +1,10 @@
 #![no_main]
 #![no_std]
+#![feature(core_intrinsics)]
+
+use acpi::RSDP;
+
+pub mod acpi;
 
 #[derive(Clone, Copy, Debug)]
 pub enum PixelFormat {
@@ -142,4 +147,5 @@ pub enum MemoryType {
 pub struct BootInfo {
     pub frame_config: FrameBufferConfig,
     pub memory_map: MemoryMap,
+    pub rsdp: &'static RSDP,
 }

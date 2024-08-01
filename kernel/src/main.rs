@@ -63,6 +63,13 @@ fn kernel_main(boot_info: BootInfo) {
     init_task();
     info!("Task Management Initialized");
 
+    info!("ACPI Initialize info");
+    if !boot_info.rsdp.is_valid() {
+        info!("RSDP Validation Failed");
+    } else {
+        info!("RSDP Validation Success");
+    }
+
     LocalAPICRegisters::default().apic_timer().init(
         0b1011,
         false,
@@ -130,6 +137,7 @@ fn kernel_main(boot_info: BootInfo) {
         None => {}
     }
     create_task(0, task2 as u64);
+    create_task(0, task3 as u64);
 }
 
 fn task1() {
@@ -141,5 +149,11 @@ fn task1() {
 fn task2() {
     loop {
         print!("a");
+    }
+}
+
+fn task3() {
+    loop {
+        print!("b");
     }
 }

@@ -9,7 +9,7 @@ use core::{
     ptr::{copy_nonoverlapping, slice_from_raw_parts_mut, write_bytes},
 };
 
-use bootloader::{BootInfo, FrameBufferConfig, MemoryMap};
+use bootloader::{acpi::RSDP, BootInfo, FrameBufferConfig, MemoryMap};
 use elflib::{Elf64, PT_LOAD};
 use log::info;
 use uefi::{
@@ -23,7 +23,10 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{self, AllocateType, BootServices, MemoryType},
+    table::{
+        boot::{self, AllocateType, BootServices, MemoryType},
+        cfg::ACPI2_GUID,
+    },
 };
 
 type EntryPoint = extern "sysv64" fn(BootInfo);
@@ -34,26 +37,9 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
     let (kernel_entry_point, boot_info) = {
         info!("Boot Start!");
-        // Memory Map Load
+
         let bs = system_table.boot_services();
-        let mmap_size = bs.memory_map_size();
-        let mmap_byte = mmap_size.map_size + (mmap_size.entry_size * 5);
-        let mmap_buf = bs
-            .allocate_pool(MemoryType::RUNTIME_SERVICES_DATA, mmap_byte)
-            .unwrap();
-        let mmap_ref = unsafe { &mut *slice_from_raw_parts_mut(mmap_buf, mmap_byte) };
-        let memory_map = bs.memory_map(mmap_ref).expect("Cannot Get Memory Map");
         let mut root_dir = open_root_dir(bs);
-        let mut mmap_file = root_dir
-            .open(
-                cstr16!("\\memmap"),
-                FileMode::CreateReadWrite,
-                FileAttribute::empty(),
-            )
-            .unwrap()
-            .into_regular_file()
-            .unwrap();
-        save_memory_map(&mut mmap_file, &memory_map);
 
         // Kernel Load
         let mut kernel_file = root_dir
@@ -92,8 +78,27 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
         unsafe { bs.free_pool(kernel_buffer).unwrap() };
 
-        // GOP
+        // Memory Map Load
 
+        let mmap_size = bs.memory_map_size();
+        let mmap_byte = mmap_size.map_size + (mmap_size.entry_size * 5);
+        let mmap_buf = bs
+            .allocate_pool(MemoryType::RUNTIME_SERVICES_DATA, mmap_byte)
+            .unwrap();
+        let mmap_ref = unsafe { &mut *slice_from_raw_parts_mut(mmap_buf, mmap_byte) };
+        let memory_map = bs.memory_map(mmap_ref).expect("Cannot Get Memory Map");
+        let mut mmap_file = root_dir
+            .open(
+                cstr16!("\\memmap.txt"),
+                FileMode::CreateReadWrite,
+                FileAttribute::empty(),
+            )
+            .unwrap()
+            .into_regular_file()
+            .unwrap();
+        save_memory_map(&mut mmap_file, &memory_map);
+
+        // GOP
         let gop_handle = bs.get_handle_for_protocol::<GraphicsOutput>().unwrap();
         let mut gop = bs
             .open_protocol_exclusive::<GraphicsOutput>(gop_handle)
@@ -119,6 +124,19 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
             PixelFormat::BltOnly => bootloader::PixelFormat::BltOnly,
         };
 
+        //ACPI
+        let rsdp = unsafe {
+            system_table
+                .config_table()
+                .iter()
+                .find(|&entry| entry.guid == ACPI2_GUID)
+                .expect("ACPI Not Found")
+                .address
+                .cast::<RSDP>()
+                .as_ref()
+                .unwrap()
+        };
+
         (
             kernel_entry_point,
             BootInfo {
@@ -135,6 +153,7 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
                     map_size: mmap_size.map_size as u64,
                     descriptor_size: mmap_size.entry_size as u64,
                 },
+                rsdp,
             },
         )
     };

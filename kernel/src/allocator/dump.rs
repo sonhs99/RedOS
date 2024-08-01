@@ -1,4 +1,4 @@
-use super::{FrameID, BYTE_PER_FRAME};
+use super::{Allocator, FrameID, BYTE_PER_FRAME};
 use crate::sync::{Mutex, OnceLock};
 use core::{
     alloc::{GlobalAlloc, Layout},
@@ -6,37 +6,30 @@ use core::{
 };
 
 pub struct DumpAllocator {
-    start_frame: FrameID,
-    end_frame: FrameID,
     ptr: u64,
     end_ptr: u64,
 }
 
 impl DumpAllocator {
-    pub const fn new(start_frame: FrameID, end_frame: FrameID) -> Self {
+    pub const fn new(start_addr: usize, heap_size: usize) -> Self {
         Self {
-            start_frame,
-            end_frame,
-            ptr: start_frame.id() * BYTE_PER_FRAME,
-            end_ptr: end_frame.id() * BYTE_PER_FRAME,
+            ptr: start_addr as u64,
+            end_ptr: (start_addr + heap_size) as u64,
         }
     }
 }
-
-unsafe impl GlobalAlloc for OnceLock<Mutex<DumpAllocator>> {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut alloc = self.lock();
-
-        let aligned_base = super::align(alloc.ptr, layout.align() as u64);
+impl Allocator for DumpAllocator {
+    fn allocate(&mut self, layout: Layout) -> Result<*mut u8, ()> {
+        let aligned_base = super::align(self.ptr, layout.align() as u64);
         let aligned_end = super::align(aligned_base + layout.size() as u64, layout.align() as u64);
 
-        if aligned_end >= alloc.end_ptr {
-            ptr::null_mut() as *mut u8
+        if aligned_end >= self.end_ptr {
+            Err(())
         } else {
-            alloc.ptr = aligned_end;
-            aligned_base as *mut u8
+            self.ptr = aligned_end;
+            Ok(aligned_base as *mut u8)
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {}
+    fn free(&mut self, ptr: *mut u8, layout: Layout) {}
 }

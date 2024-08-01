@@ -40,7 +40,9 @@ impl Schedulable for RoundRobinScheduler {
     }
 
     fn tick(&mut self) {
-        self.process_count -= 1;
+        if self.process_count != 0 {
+            self.process_count -= 1;
+        }
     }
 
     fn reset_tick(&mut self) {

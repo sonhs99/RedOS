@@ -1,6 +1,8 @@
 use core::ptr::NonNull;
 
-use crate::queue::ListQueue;
+use log::debug;
+
+use crate::{allocator::malloc, queue::ListQueue};
 
 use super::{Context, Task};
 
@@ -32,10 +34,35 @@ impl TaskManager {
     }
 
     pub fn allocate(&mut self) -> Result<&mut Task, ()> {
+        const TASK_SIZE: usize = size_of::<Task>();
         self.use_count += 1;
         self.alloc_count = self.alloc_count.wrapping_add(1);
-        Ok(unsafe { self.empty_queue.pop().ok_or(())?.as_mut() })
+        let mut task_ptr = self.empty_queue.pop().ok_or(())?;
+        debug!("task_ptr = {task_ptr:?}, size = {TASK_SIZE:#X}");
+        Ok(unsafe { task_ptr.as_mut() })
     }
+
+    // pub fn allocate(&mut self) -> Result<&mut Task, ()> {
+    //     const TASK_SIZE: usize = size_of::<Task>();
+    //     if self.use_count >= TASKPOOL_SIZE {
+    //         return Err(());
+    //     }
+    //     self.use_count += 1;
+    //     self.alloc_count = self.alloc_count.wrapping_add(1);
+    //     unsafe {
+    //         if let Some(mut task) = self.empty_queue.pop() {
+    //             Ok(task.as_mut())
+    //         } else {
+    //             let task_ptr = malloc(size_of::<Task>(), 8).cast::<Task>();
+    //             debug!("task_ptr = {task_ptr:?}, size = {TASK_SIZE:#X}");
+    //             if let Some(mut task) = NonNull::new(task_ptr) {
+    //                 Ok(task.as_mut())
+    //             } else {
+    //                 Err(())
+    //             }
+    //         }
+    //     }
+    // }
 
     pub fn free(&mut self, task: &mut Task) {
         task.parent = None;

@@ -23,7 +23,7 @@ pub struct Console<'a> {
 pub struct ConsoleLogger;
 
 impl<'a> Console<'a> {
-    pub const Rows: usize = 49;
+    pub const Rows: usize = 25;
     pub const Columns: usize = 80;
     pub const fn new(
         writer: &'a GraphicWriter,

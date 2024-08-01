@@ -38,8 +38,8 @@ impl Task {
     pub fn new(id: u64, flags: u64, entry_point: u64, stack_addr: u64, stack_size: u64) -> Self {
         let mut context = Context::empty();
 
-        context.rsp = stack_addr + stack_size;
-        context.rbp = stack_addr + stack_size;
+        context.rsp = stack_addr + stack_size - 8;
+        context.rbp = stack_addr + stack_size - 8;
 
         context.cs = 0x08;
         context.ss = 0x10;
@@ -320,7 +320,7 @@ pub fn init_task() {
         .get_or_init(|| Mutex::new(TaskManager::new()))
         .lock();
     let scheduler = SCHEDULER.get_or_init(|| Mutex::new(RoundRobinScheduler::new()));
-    TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 8) as u64);
+    TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 16) as u64);
     let task = manager.allocate().unwrap();
     scheduler.lock().set_running_task(task);
 }
@@ -328,10 +328,8 @@ pub fn init_task() {
 pub fn create_task(flag: u64, entry_point: u64) -> Result<(), ()> {
     let mut manager = TASK_MANAGER.lock();
     let task = manager.allocate()?;
-    // println!("alloc {}", task.id);
 
     let stack_addr = TASK_STACK.get().unwrap() + 8192 * task.id;
-    // println!("stack_addr: {:X}", stack_addr);
     *task = Task::new(task.id, flag, entry_point, stack_addr, STACK_SIZE as u64);
 
     SCHEDULER.lock().push_task(task);
