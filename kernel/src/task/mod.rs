@@ -1,10 +1,12 @@
+pub mod idle;
 mod manager;
 pub mod scheduler;
 
 use core::ptr::NonNull;
 
+use log::debug;
 use manager::TaskManager;
-use scheduler::{rr::RoundRobinScheduler, Schedulable};
+use scheduler::{prr::PriorityRoundRobinScheduler, rr::RoundRobinScheduler, Schedulable};
 
 use crate::{
     allocator::malloc,
@@ -16,12 +18,47 @@ use crate::{
 };
 
 #[derive(Clone, Copy)]
+pub struct TaskFlags(u64);
+
+impl TaskFlags {
+    pub fn new() -> Self {
+        Self(0)
+    }
+    pub fn set_priority(&mut self, priority: u8) -> &mut Self {
+        self.0 = self.0 & 0xFF | priority as u64;
+        self
+    }
+
+    pub const fn priority(&self) -> u8 {
+        (self.0 & 0xFF) as u8
+    }
+
+    pub fn terminate(&mut self) -> &mut Self {
+        self.0 |= 0x8000_0000_0000_0000;
+        self
+    }
+
+    pub const fn is_terminated(&self) -> bool {
+        self.0 & 0x8000_0000_0000_0000 != 0
+    }
+
+    pub fn thread(&mut self) -> &mut Self {
+        self.0 |= 0x4000_0000_0000_0000;
+        self
+    }
+
+    pub const fn is_thread(&self) -> bool {
+        self.0 & 0x4000_0000_0000_0000 != 0
+    }
+}
+
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Task {
     context: Context,
 
     id: u64,
-    flags: u64,
+    flags: TaskFlags,
 
     next: Option<NonNull<Task>>,
     prev: Option<NonNull<Task>>,
@@ -32,10 +69,21 @@ pub struct Task {
 
     stack_addr: u64,
     stack_size: u64,
+
+    memory_addr: u64,
+    memory_size: u64,
 }
 
 impl Task {
-    pub fn new(id: u64, flags: u64, entry_point: u64, stack_addr: u64, stack_size: u64) -> Self {
+    pub fn new(
+        id: u64,
+        flags: TaskFlags,
+        entry_point: u64,
+        stack_addr: u64,
+        stack_size: u64,
+        memory_addr: u64,
+        memory_size: u64,
+    ) -> Self {
         let mut context = Context::empty();
 
         context.rsp = stack_addr + stack_size - 8;
@@ -52,6 +100,8 @@ impl Task {
 
         context.rflags |= 0x0200;
 
+        unsafe { *(context.rsp as *mut u64) = exit as u64 };
+
         Self {
             context,
             id,
@@ -63,6 +113,8 @@ impl Task {
             parent: None,
             child: None,
             sibling: None,
+            memory_addr,
+            memory_size,
         }
     }
 
@@ -74,7 +126,7 @@ impl Task {
         Self {
             context: Context::empty(),
             id: 0,
-            flags: 0,
+            flags: TaskFlags(0),
             stack_addr: 0,
             stack_size: 0,
             next: None,
@@ -82,6 +134,8 @@ impl Task {
             parent: None,
             child: None,
             sibling: None,
+            memory_addr: 0,
+            memory_size: 0,
         }
     }
 
@@ -276,14 +330,18 @@ const STACK_SIZE: usize = 0x2000;
 
 static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
 static TASK_STACK: OnceLock<u64> = OnceLock::new();
-static SCHEDULER: OnceLock<Mutex<RoundRobinScheduler>> = OnceLock::new();
+pub static SCHEDULER: OnceLock<Mutex<PriorityRoundRobinScheduler>> = OnceLock::new();
 
 pub fn schedule() {
     let _ = without_interrupts(|| {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
-        scheduler.push_task(running_task);
+        if running_task.flags.is_terminated() {
+            scheduler.push_wait(running_task);
+        } else {
+            scheduler.push_task(running_task);
+        }
         scheduler.set_running_task(next_task);
         // println!("schedule {} -> {}", running_task.id, next_task.id);
         running_task.context().switch_to(next_task.context());
@@ -297,14 +355,19 @@ pub fn schedule_int(context: &mut Context) {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
-        // println!("schedule_int {} -> {}", running_task.id, next_task.id);
-        scheduler.push_task(running_task);
+        if running_task.flags.is_terminated() {
+            scheduler.push_wait(running_task);
+        } else {
+            scheduler.push_task(running_task);
+        }
+        // debug!("[SCHD] {} -> {}", running_task.id, next_task.id);
         scheduler.set_running_task(next_task);
         running_task.context = *context;
         *context = next_task.context;
         scheduler.reset_tick();
         Some(())
-    });
+    })
+    .unwrap();
 }
 
 pub fn is_expired() -> bool {
@@ -319,19 +382,70 @@ pub fn init_task() {
     let mut manager = TASK_MANAGER
         .get_or_init(|| Mutex::new(TaskManager::new()))
         .lock();
-    let scheduler = SCHEDULER.get_or_init(|| Mutex::new(RoundRobinScheduler::new()));
+    let scheduler = SCHEDULER.get_or_init(|| Mutex::new(PriorityRoundRobinScheduler::new()));
     TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 16) as u64);
     let task = manager.allocate().unwrap();
     scheduler.lock().set_running_task(task);
 }
 
-pub fn create_task(flag: u64, entry_point: u64) -> Result<(), ()> {
+pub fn create_task(
+    flag: TaskFlags,
+    entry_point: u64,
+    memory_addr: u64,
+    memory_size: u64,
+) -> Result<(), ()> {
     let mut manager = TASK_MANAGER.lock();
     let task = manager.allocate()?;
 
-    let stack_addr = TASK_STACK.get().unwrap() + 8192 * task.id;
-    *task = Task::new(task.id, flag, entry_point, stack_addr, STACK_SIZE as u64);
+    let parent_task = SCHEDULER.lock().running_task();
+    let stack_addr = TASK_STACK.get().ok_or(())? + STACK_SIZE as u64 * task.id;
+
+    let (memory_addr, memory_size) = if flag.is_thread() {
+        unsafe {
+            (
+                parent_task.unwrap().as_mut().memory_addr,
+                parent_task.unwrap().as_mut().memory_size,
+            )
+        }
+    } else {
+        (memory_addr, memory_size)
+    };
+    *task = Task::new(
+        task.id,
+        flag,
+        entry_point,
+        stack_addr,
+        STACK_SIZE as u64,
+        memory_addr,
+        memory_size,
+    );
+    debug!("stack_addr = {stack_addr:#X}");
+
+    task.parent = parent_task;
+    if let Some(mut parent) = parent_task {
+        let parent = unsafe { parent.as_mut() };
+        task.sibling = parent.child;
+        parent.child = NonNull::new(task);
+    }
 
     SCHEDULER.lock().push_task(task);
     Ok(())
+}
+
+pub fn end_task(id: u64) {
+    let mut manager = TASK_MANAGER.lock();
+    let task = manager.get(id).unwrap();
+    task.flags.terminate();
+    if unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() }.id == id {
+        schedule();
+        loop {}
+    } else {
+        SCHEDULER.lock().remove_task(task);
+        SCHEDULER.lock().push_wait(task);
+    }
+}
+
+pub fn exit() {
+    let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
+    end_task(running_task.id);
 }

@@ -55,6 +55,7 @@ pub trait Node {
 pub struct ListQueue<N: Node> {
     head: Option<NonNull<N>>,
     tail: Option<NonNull<N>>,
+    length: usize,
 }
 
 impl<N: Node> ListQueue<N> {
@@ -62,11 +63,16 @@ impl<N: Node> ListQueue<N> {
         Self {
             head: None,
             tail: None,
+            length: 0,
         }
     }
 
     pub fn is_empty(&self) -> bool {
         self.head == None
+    }
+
+    pub const fn length(&self) -> usize {
+        self.length
     }
 
     pub fn push(&mut self, mut node: NonNull<N>) {
@@ -81,6 +87,7 @@ impl<N: Node> ListQueue<N> {
         if let None = self.head {
             self.head = Some(node);
         }
+        self.length += 1;
     }
 
     pub fn pop(&mut self) -> Option<NonNull<N>> {
@@ -94,10 +101,29 @@ impl<N: Node> ListQueue<N> {
                 } else {
                     self.tail = None;
                 }
+                self.length -= 1;
                 return Some(node);
             }
         }
         None
+    }
+
+    pub fn remove(&mut self, mut node: NonNull<N>) {
+        self.length -= 1;
+        unsafe {
+            let mut next_node = node.as_mut().next();
+            let mut prev_node = node.as_mut().prev();
+            if let Some(mut next) = next_node {
+                next.as_mut().set_prev(prev_node);
+            }
+            if let Some(mut prev) = prev_node {
+                prev.as_mut().set_next(next_node);
+            }
+        }
+    }
+
+    pub fn iter(&mut self) -> ListIter<N> {
+        ListIter { ptr: self.head }
     }
 }
 

@@ -2,7 +2,7 @@ use keycode::{Key, KeySpecial};
 use log::debug;
 use usb::USBKeyboardDriver;
 
-use crate::{print, queue::ArrayQueue, sync::Mutex};
+use crate::{print, queue::ArrayQueue, sync::Mutex, task::schedule};
 
 mod keycode;
 mod manager;
@@ -40,6 +40,7 @@ pub fn getch() -> u8 {
         if let Key::Ascii(byte) = get_code() {
             return byte;
         }
+        schedule();
     }
     0u8
 }

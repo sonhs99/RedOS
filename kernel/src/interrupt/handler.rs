@@ -1,10 +1,12 @@
 use core::arch::asm;
 
+use log::debug;
+
 use crate::{
     device::xhc::XHC,
     interrupt::apic::LocalAPICRegisters,
     println,
-    task::{decrease_tick, is_expired, schedule_int, Context},
+    task::{decrease_tick, is_expired, schedule_int, scheduler::Schedulable, Context, SCHEDULER},
 };
 
 #[derive(Debug)]
@@ -282,6 +284,7 @@ pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
 pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
     decrease_tick();
     if is_expired() {
+        // debug!("timer");
         schedule_int(current_context);
     }
     LocalAPICRegisters::default().end_of_interrupt().notify();

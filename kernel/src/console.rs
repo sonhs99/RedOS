@@ -3,6 +3,7 @@ use core::{fmt, ptr::write_bytes};
 use crate::{
     font::write_ascii,
     graphic::{GraphicWriter, PixelColor},
+    interrupt::without_interrupts,
     sync::{Mutex, OnceLock},
 };
 
@@ -23,7 +24,7 @@ pub struct Console<'a> {
 pub struct ConsoleLogger;
 
 impl<'a> Console<'a> {
-    pub const Rows: usize = 25;
+    pub const Rows: usize = 50;
     pub const Columns: usize = 80;
     pub const fn new(
         writer: &'a GraphicWriter,
@@ -141,5 +142,7 @@ impl Log for ConsoleLogger {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    CONSOLE.lock().write_fmt(args).unwrap();
+    without_interrupts(|| {
+        CONSOLE.lock().write_fmt(args).unwrap();
+    });
 }

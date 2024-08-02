@@ -21,7 +21,7 @@ static mut PML4_TABLE: PageTable = PageTable::new();
 static mut PDP_TABLE: PageTable = PageTable::new();
 static mut PD_TABLE: [PageTable; PAGE_DIRECTORY_COUNT] = [PageTable::new(); PAGE_DIRECTORY_COUNT];
 
-unsafe fn init_page_unsafe() {
+unsafe fn init_page_identity_unsafe() {
     PML4_TABLE.0[0] = PDP_TABLE.0.as_ptr() as u64 | 0x03;
     for pdp_idx in 0..PAGE_DIRECTORY_COUNT {
         PDP_TABLE.0[pdp_idx] = PD_TABLE[pdp_idx].0.as_ptr() as u64 | 0x03;
@@ -37,5 +37,5 @@ unsafe fn init_page_unsafe() {
 }
 
 pub fn init_page() {
-    unsafe { init_page_unsafe() };
+    unsafe { init_page_identity_unsafe() };
 }

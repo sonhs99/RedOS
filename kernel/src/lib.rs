@@ -4,9 +4,11 @@
 #![feature(generic_arg_infer)]
 #![feature(generic_nonzero)]
 #![feature(naked_functions)]
+#![feature(core_intrinsics)]
 
 extern crate alloc;
 
+pub mod acpi;
 pub mod allocator;
 pub mod console;
 pub mod device;

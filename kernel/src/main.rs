@@ -8,6 +8,7 @@ use core::arch::asm;
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
+    acpi,
     allocator::init_heap,
     console::{init_console, Console},
     device::{
@@ -30,7 +31,7 @@ use kernel::{
     },
     page::init_page,
     print, println,
-    task::{create_task, init_task, schedule},
+    task::{create_task, exit, idle, init_task, schedule, TaskFlags},
 };
 use log::{debug, info, trace, warn};
 
@@ -51,7 +52,6 @@ fn kernel_main(boot_info: BootInfo) {
     info!("GDT Initialized");
 
     init_idt();
-    set_interrupt(true);
     info!("IDT Initialized");
 
     init_page();
@@ -61,14 +61,16 @@ fn kernel_main(boot_info: BootInfo) {
     info!("Heap Initialized");
 
     init_task();
+    create_task(
+        TaskFlags::new().set_priority(0xFF).clone(),
+        idle::idle as u64,
+        0,
+        0,
+    );
     info!("Task Management Initialized");
 
-    info!("ACPI Initialize info");
-    if !boot_info.rsdp.is_valid() {
-        info!("RSDP Validation Failed");
-    } else {
-        info!("RSDP Validation Success");
-    }
+    acpi::initialize(boot_info.rsdp);
+    info!("ACPI Initialized");
 
     LocalAPICRegisters::default().apic_timer().init(
         0b1011,
@@ -76,6 +78,7 @@ fn kernel_main(boot_info: BootInfo) {
         APICTimerMode::Periodic,
         InterruptVector::APICTimer as u8,
     );
+    set_interrupt(true);
 
     info!("Enable APIC Timer Interrupt");
     info!("PCI Init Started");
@@ -132,12 +135,12 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
-            create_task(0, task1 as u64);
+            create_task(TaskFlags::new(), task1 as u64, 0, 0);
         }
         None => {}
     }
-    create_task(0, task2 as u64);
-    create_task(0, task3 as u64);
+    create_task(TaskFlags::new(), task2 as u64, 0, 0);
+    // create_task(TaskFlags::new(), task3 as u64, 0, 0);
 }
 
 fn task1() {
@@ -147,9 +150,11 @@ fn task1() {
 }
 
 fn task2() {
-    loop {
+    create_task(TaskFlags::new().thread().clone(), task3 as u64, 0, 0);
+    for _ in 0..10000 {
         print!("a");
     }
+    exit();
 }
 
 fn task3() {
