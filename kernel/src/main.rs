@@ -61,12 +61,6 @@ fn kernel_main(boot_info: BootInfo) {
     info!("Heap Initialized");
 
     init_task();
-    create_task(
-        TaskFlags::new().set_priority(0xFF).clone(),
-        idle::idle as u64,
-        0,
-        0,
-    );
     info!("Task Management Initialized");
 
     acpi::initialize(boot_info.rsdp);
@@ -154,7 +148,6 @@ fn task2() {
     for _ in 0..10000 {
         print!("a");
     }
-    exit();
 }
 
 fn task3() {

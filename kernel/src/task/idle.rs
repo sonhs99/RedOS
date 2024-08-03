@@ -6,7 +6,7 @@ use super::Schedulable;
 use super::SCHEDULER;
 use super::TASK_MANAGER;
 
-pub fn idle() {
+pub fn idle_task() {
     loop {
         without_interrupts(|| {
             let mut scheduler = SCHEDULER.lock();

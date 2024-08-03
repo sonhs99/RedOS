@@ -100,7 +100,7 @@ impl Task {
 
         context.rflags |= 0x0200;
 
-        unsafe { *(context.rsp as *mut u64) = exit as u64 };
+        unsafe { *(context.rsp as *mut u64) = exit_inner as u64 };
 
         Self {
             context,
@@ -386,6 +386,14 @@ pub fn init_task() {
     TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 16) as u64);
     let task = manager.allocate().unwrap();
     scheduler.lock().set_running_task(task);
+    task.flags = *TaskFlags::new().set_priority(0);
+
+    create_task(
+        TaskFlags::new().set_priority(0xFF).clone(),
+        idle::idle_task as u64,
+        0,
+        0,
+    );
 }
 
 pub fn create_task(
@@ -435,6 +443,7 @@ pub fn create_task(
 pub fn end_task(id: u64) {
     let mut manager = TASK_MANAGER.lock();
     let task = manager.get(id).unwrap();
+    debug!("exit");
     task.flags.terminate();
     if unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() }.id == id {
         schedule();
@@ -446,6 +455,13 @@ pub fn end_task(id: u64) {
 }
 
 pub fn exit() {
+    let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
+    end_task(running_task.id);
+}
+
+fn exit_inner() {
+    use core::arch::asm;
+    unsafe { asm!("sub rsp, 8") };
     let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
     end_task(running_task.id);
 }
