@@ -9,6 +9,7 @@ pub struct RoundRobinScheduler {
     queue: ListQueue<Task>,
     wait: ListQueue<Task>,
     process_count: u64,
+    last_fpu_used: Option<u64>,
 }
 
 impl RoundRobinScheduler {
@@ -18,6 +19,7 @@ impl RoundRobinScheduler {
             queue: ListQueue::new(),
             wait: ListQueue::new(),
             process_count: PROCESSTIME_COUNT,
+            last_fpu_used: None,
         }
     }
 }
@@ -67,5 +69,13 @@ impl Schedulable for RoundRobinScheduler {
     fn remove_task(&mut self, task: &mut Task) -> Result<(), ()> {
         self.queue.remove(NonNull::new(task).ok_or(())?);
         Ok(())
+    }
+
+    fn last_fpu_used(&self) -> Option<u64> {
+        self.last_fpu_used
+    }
+
+    fn set_fpu_used(&mut self, id: u64) {
+        self.last_fpu_used = Some(id);
     }
 }

@@ -37,6 +37,8 @@ pub fn init_idt() {
             .set_option(option);
         idt.set_handler(6, handler_without_err_code!(invalid_opcode))
             .set_option(option);
+        // idt.set_handler(7, handler_with_err_code!(device_not_available))
+        //     .set_option(option);
         idt.set_handler(8, handler_with_err_code!(double_fault))
             .set_option(option);
         idt.set_handler(13, handler_with_err_code!(general_protection))

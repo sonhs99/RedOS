@@ -15,13 +15,20 @@ pub trait Schedulable {
     fn next_task(&mut self) -> Option<NonNull<Task>>;
     fn push_task(&mut self, task: &mut Task);
 
+    // Wait Queue
     fn next_wait(&mut self) -> Option<NonNull<Task>>;
     fn push_wait(&mut self, task: &mut Task);
 
+    // Priority
     fn change_priority(&mut self, id: u64, priority: u8) -> Result<(), ()>;
     fn remove_task(&mut self, task: &mut Task) -> Result<(), ()>;
 
+    // Preemptive Schedule
     fn tick(&mut self);
     fn reset_tick(&mut self);
     fn is_expired(&self) -> bool;
+
+    // FPU
+    fn last_fpu_used(&self) -> Option<u64>;
+    fn set_fpu_used(&mut self, id: u64);
 }

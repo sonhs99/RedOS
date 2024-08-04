@@ -56,7 +56,7 @@ impl APICTimer {
     const CURRENT_COUNTER: u32 = 0x390;
     const DIVIDER: u32 = 0x3E0;
 
-    const INIT_COUNTER_VALUE: u32 = 0x0100_0000;
+    const INIT_COUNTER_VALUE: u32 = 0x0001_0000;
     pub fn init(&self, divider: u8, mask: bool, mode: APICTimerMode, vector: u8) {
         let mut data = vector as u32;
         data |= (mask as u32) << 16;

@@ -4,9 +4,13 @@ use log::debug;
 
 use crate::{
     device::xhc::XHC,
+    float::{clear_ts, fpu_init, fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
     println,
-    task::{decrease_tick, is_expired, schedule_int, scheduler::Schedulable, Context, SCHEDULER},
+    task::{
+        decrease_tick, get_task_from_id, is_expired, last_fpu_used, running_task, schedule_int,
+        scheduler::Schedulable, set_fpu_used, Context, SCHEDULER,
+    },
 };
 
 #[derive(Debug)]
@@ -251,6 +255,26 @@ pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
     );
     loop {}
 }
+
+// pub extern "C" fn device_not_available(stack_frame: &ExceptionStackFrame, error_code: u64) {
+//     println!("[EXCEP]: DEVICE_NOT_AVAILABLE");
+//     clear_ts();
+//     let current = running_task();
+//     if let Some(last_id) = last_fpu_used() {
+//         if last_id == current.id() {
+//             return;
+//         } else if let Some(last) = get_task_from_id(last_id) {
+//             fpu_save(last.fpu_context());
+//         }
+//     }
+//     if !current.fpu_used() {
+//         fpu_init();
+//         current.set_fpu_used();
+//     } else {
+//         fpu_load(current.fpu_context());
+//     }
+//     set_fpu_used(current.id())
+// }
 
 pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
     println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");

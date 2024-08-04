@@ -4,12 +4,13 @@ pub mod scheduler;
 
 use core::ptr::NonNull;
 
-use log::debug;
+use log::{debug, error};
 use manager::TaskManager;
 use scheduler::{prr::PriorityRoundRobinScheduler, rr::RoundRobinScheduler, Schedulable};
 
 use crate::{
     allocator::malloc,
+    float::{clear_ts, fpu_load, fpu_save, set_ts},
     interrupt::without_interrupts,
     println,
     queue::Node,
@@ -21,41 +22,45 @@ use crate::{
 pub struct TaskFlags(u64);
 
 impl TaskFlags {
+    const TASK_PRIORITY: u64 = 0xFF;
+    const TASK_TERMINATE: u64 = 0x8000_0000_0000_0000;
+    const TASK_THREAD: u64 = 0x4000_0000_0000_0000;
     pub fn new() -> Self {
         Self(0)
     }
     pub fn set_priority(&mut self, priority: u8) -> &mut Self {
-        self.0 = self.0 & 0xFF | priority as u64;
+        self.0 = self.0 & Self::TASK_PRIORITY | priority as u64;
         self
     }
 
     pub const fn priority(&self) -> u8 {
-        (self.0 & 0xFF) as u8
+        (self.0 & Self::TASK_PRIORITY) as u8
     }
 
     pub fn terminate(&mut self) -> &mut Self {
-        self.0 |= 0x8000_0000_0000_0000;
+        self.0 |= Self::TASK_TERMINATE;
         self
     }
 
     pub const fn is_terminated(&self) -> bool {
-        self.0 & 0x8000_0000_0000_0000 != 0
+        self.0 & Self::TASK_TERMINATE != 0
     }
 
     pub fn thread(&mut self) -> &mut Self {
-        self.0 |= 0x4000_0000_0000_0000;
+        self.0 |= Self::TASK_THREAD;
         self
     }
 
     pub const fn is_thread(&self) -> bool {
-        self.0 & 0x4000_0000_0000_0000 != 0
+        self.0 & Self::TASK_THREAD != 0
     }
 }
 
 #[derive(Clone, Copy)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct Task {
     context: Context,
+    fpu_context: FPUContext,
 
     id: u64,
     flags: TaskFlags,
@@ -97,13 +102,15 @@ impl Task {
         context.gs = 0x10;
 
         context.rip = entry_point;
-
         context.rflags |= 0x0200;
-
         unsafe { *(context.rsp as *mut u64) = exit_inner as u64 };
+
+        let mut fpu_context = FPUContext::new();
+        unsafe { *(fpu_context.get(24).cast::<u16>()) = 0x1f80 };
 
         Self {
             context,
+            fpu_context,
             id,
             flags,
             stack_addr,
@@ -118,6 +125,10 @@ impl Task {
         }
     }
 
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
     pub fn context(&mut self) -> &Context {
         &mut self.context
     }
@@ -125,6 +136,7 @@ impl Task {
     pub const fn empty() -> Self {
         Self {
             context: Context::empty(),
+            fpu_context: FPUContext::new(),
             id: 0,
             flags: TaskFlags(0),
             stack_addr: 0,
@@ -326,6 +338,28 @@ extern "sysv64" fn context_switch(current: &Context, next: &Context) {
     };
 }
 
+#[derive(Clone, Copy)]
+#[repr(C, align(16))]
+pub struct FPUContext([u8; 512]);
+
+impl FPUContext {
+    pub const fn new() -> Self {
+        Self([0; 512])
+    }
+
+    pub fn get(&mut self, idx: usize) -> *mut u8 {
+        (&mut self.0[idx]) as *mut u8
+    }
+
+    pub fn save(&self) {
+        fpu_save(self as *const _ as u64);
+    }
+
+    pub fn load(&self) {
+        fpu_load(self as *const _ as u64);
+    }
+}
+
 const STACK_SIZE: usize = 0x2000;
 
 static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
@@ -337,6 +371,15 @@ pub fn schedule() {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
+
+        if scheduler
+            .last_fpu_used()
+            .is_some_and(|last| last != running_task.id)
+        {
+            set_ts();
+        } else {
+            clear_ts();
+        }
         if running_task.flags.is_terminated() {
             scheduler.push_wait(running_task);
         } else {
@@ -344,6 +387,8 @@ pub fn schedule() {
         }
         scheduler.set_running_task(next_task);
         // println!("schedule {} -> {}", running_task.id, next_task.id);
+        running_task.fpu_context.save();
+        next_task.fpu_context.load();
         running_task.context().switch_to(next_task.context());
         scheduler.reset_tick();
         Some(())
@@ -355,6 +400,14 @@ pub fn schedule_int(context: &mut Context) {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
+        if scheduler
+            .last_fpu_used()
+            .is_some_and(|last| last != running_task.id)
+        {
+            set_ts();
+        } else {
+            clear_ts();
+        }
         if running_task.flags.is_terminated() {
             scheduler.push_wait(running_task);
         } else {
@@ -362,12 +415,14 @@ pub fn schedule_int(context: &mut Context) {
         }
         // debug!("[SCHD] {} -> {}", running_task.id, next_task.id);
         scheduler.set_running_task(next_task);
+
+        running_task.fpu_context.save();
         running_task.context = *context;
+        next_task.fpu_context.load();
         *context = next_task.context;
         scheduler.reset_tick();
         Some(())
-    })
-    .unwrap();
+    });
 }
 
 pub fn is_expired() -> bool {
@@ -427,7 +482,7 @@ pub fn create_task(
         memory_addr,
         memory_size,
     );
-    debug!("stack_addr = {stack_addr:#X}");
+    // debug!("stack_addr = {stack_addr:#X}");
 
     task.parent = parent_task;
     if let Some(mut parent) = parent_task {
@@ -442,8 +497,20 @@ pub fn create_task(
 
 pub fn end_task(id: u64) {
     let mut manager = TASK_MANAGER.lock();
-    let task = manager.get(id).unwrap();
-    debug!("exit");
+    let task = match manager.get(id) {
+        Some(task) => task,
+        None => {
+            without_interrupts(|| {
+                error!("Task {id} Not Found");
+                for task_ in manager.iter() {
+                    debug!("id={}, Task {}, flag={}", id, task_.id, id = task_.id);
+                }
+            });
+            loop {}
+        }
+    };
+    // let task = manager.get(id).unwrap();
+    // debug!("exit");
     task.flags.terminate();
     if unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() }.id == id {
         schedule();
@@ -464,4 +531,20 @@ fn exit_inner() {
     unsafe { asm!("sub rsp, 8") };
     let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
     end_task(running_task.id);
+}
+
+pub fn set_fpu_used(id: u64) {
+    SCHEDULER.lock().set_fpu_used(id);
+}
+
+pub fn last_fpu_used() -> Option<u64> {
+    SCHEDULER.lock().last_fpu_used()
+}
+
+pub fn running_task() -> &'static mut Task {
+    unsafe { SCHEDULER.lock().running_task().unwrap().as_mut() }
+}
+
+pub fn get_task_from_id(id: u64) -> Option<&'static mut Task> {
+    TASK_MANAGER.lock().get(id)
 }

@@ -1,4 +1,4 @@
-use super::{Context, Task};
+use super::{Context, FPUContext, Task};
 use crate::{allocator::malloc, queue::ListQueue};
 use core::ptr::NonNull;
 use hashbrown::HashMap;
@@ -36,7 +36,7 @@ impl TaskManager {
                 task.as_mut()
             } else {
                 let task_ptr = malloc(size_of::<Task>(), 8).cast::<Task>();
-                debug!("task_ptr = {task_ptr:?}, size = {TASK_SIZE:#X}");
+                // debug!("task_ptr = {task_ptr:?}, size = {TASK_SIZE:#X}");
                 if let Some(mut task) = NonNull::new(task_ptr) {
                     task.as_mut()
                 } else {
@@ -50,18 +50,34 @@ impl TaskManager {
     }
 
     pub fn free(&mut self, task: &mut Task) {
+        self.task_map.remove(&task.id);
+
         task.parent = None;
         task.child = None;
         task.sibling = None;
         task.context = Context::empty();
+        task.fpu_context = FPUContext::new();
+
         self.empty_queue.push(NonNull::new(task).unwrap());
-        self.task_map.remove(&task.id);
         self.use_count -= 1;
     }
 
     pub fn get(&mut self, id: u64) -> Option<&'static mut Task> {
         // let task_ptr = self.task_map.get(&id);
         // debug!("task_ptr = {task_ptr:?}");
-        Some(unsafe { self.task_map.get_mut(&id)?.as_mut() })
+        // Some(unsafe { self.task_map.get_mut(&id)?.as_mut() })
+        self.task_map.iter_mut().find_map(|(&task_id, task)| {
+            if (task_id == id) {
+                unsafe { Some(task.as_mut()) }
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Task> {
+        self.task_map
+            .iter()
+            .map(|(id, task)| unsafe { task.as_ref() })
     }
 }

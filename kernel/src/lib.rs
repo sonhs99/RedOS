@@ -12,6 +12,7 @@ pub mod acpi;
 pub mod allocator;
 pub mod console;
 pub mod device;
+pub mod float;
 pub mod font;
 pub mod gdt;
 pub mod graphic;
@@ -20,9 +21,11 @@ pub mod page;
 mod queue;
 pub mod sync;
 pub mod task;
+pub mod window;
 
 use core::panic::PanicInfo;
 use log::error;
+use task::running_task;
 
 #[repr(C, align(16))]
 pub struct KernelStack<const N: usize>([u8; N]);
@@ -75,6 +78,6 @@ macro_rules! entry_point {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    error!("{}", info);
+    error!("in Task {}\n{}", running_task().id(), info);
     loop {}
 }

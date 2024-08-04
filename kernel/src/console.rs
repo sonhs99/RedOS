@@ -2,7 +2,7 @@ use core::{fmt, ptr::write_bytes};
 
 use crate::{
     font::write_ascii,
-    graphic::{GraphicWriter, PixelColor},
+    graphic::{get_graphic, GraphicWriter, PixelColor},
     interrupt::without_interrupts,
     sync::{Mutex, OnceLock},
 };
@@ -12,8 +12,7 @@ use log::{Level, Log};
 pub static CONSOLE: OnceLock<Mutex<Console>> = OnceLock::new();
 pub static LOGGER: ConsoleLogger = ConsoleLogger;
 
-pub struct Console<'a> {
-    writer: &'a GraphicWriter,
+pub struct Console {
     bg_color: PixelColor,
     fg_color: PixelColor,
     buffer: [[u8; Console::Columns + 1]; Console::Rows],
@@ -23,16 +22,11 @@ pub struct Console<'a> {
 
 pub struct ConsoleLogger;
 
-impl<'a> Console<'a> {
+impl Console {
     pub const Rows: usize = 50;
     pub const Columns: usize = 80;
-    pub const fn new(
-        writer: &'a GraphicWriter,
-        bg_color: PixelColor,
-        fg_color: PixelColor,
-    ) -> Self {
+    pub const fn new(bg_color: PixelColor, fg_color: PixelColor) -> Self {
         Self {
-            writer,
             bg_color,
             fg_color,
             buffer: [[0u8; Console::Columns + 1]; Console::Rows],
@@ -58,11 +52,11 @@ impl<'a> Console<'a> {
                     self.newline();
                 }
                 write_ascii(
-                    self.writer,
                     8 * self.cursor_column,
                     16 * self.cursor_row,
                     c,
                     self.fg_color,
+                    self.bg_color,
                 );
                 self.buffer[self.cursor_row as usize][self.cursor_column as usize] = c;
                 self.cursor_column += 1
@@ -79,7 +73,7 @@ impl<'a> Console<'a> {
         } else {
             for y in 0..16 * Console::Rows {
                 for x in 0..8 * Console::Columns {
-                    self.writer.write(x, y, self.bg_color);
+                    get_graphic().lock().write(x, y, self.bg_color);
                 }
             }
             for row in 0..(Console::Rows - 1) {
@@ -87,11 +81,11 @@ impl<'a> Console<'a> {
                     let c = self.buffer[row + 1][column];
                     self.buffer[row][column] = c;
                     write_ascii(
-                        self.writer,
                         8 * column as u64,
                         16 * row as u64,
                         c,
                         self.fg_color,
+                        self.bg_color,
                     );
                 }
             }
@@ -102,15 +96,15 @@ impl<'a> Console<'a> {
     }
 }
 
-impl fmt::Write for Console<'_> {
+impl fmt::Write for Console {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         self.put_string(s.as_bytes());
         Ok(())
     }
 }
 
-pub fn init_console(writer: &'static GraphicWriter, bg_color: PixelColor, fg_color: PixelColor) {
-    CONSOLE.get_or_init(|| Mutex::new(Console::new(writer, bg_color, fg_color)));
+pub fn init_console(bg_color: PixelColor, fg_color: PixelColor) {
+    CONSOLE.get_or_init(|| Mutex::new(Console::new(bg_color, fg_color)));
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug));
 }
 

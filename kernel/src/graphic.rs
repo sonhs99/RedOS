@@ -2,11 +2,11 @@ use bootloader::{FrameBufferConfig, PixelFormat};
 
 use core::ptr::slice_from_raw_parts_mut;
 
-use crate::sync::OnceLock;
+use crate::sync::{Mutex, OnceLock};
 
-pub static PIXEL_WRITER: OnceLock<GraphicWriter> = OnceLock::new();
+pub static PIXEL_WRITER: OnceLock<Mutex<GraphicWriter>> = OnceLock::new();
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct PixelColor(u8, u8, u8);
 
 impl PixelColor {
@@ -68,8 +68,12 @@ fn rgb_write(writer: &GraphicWriter, x: usize, y: usize, color: PixelColor) {
     pixel[2] = color.2;
 }
 
-pub fn graphic(frame_config: FrameBufferConfig) -> &'static GraphicWriter {
-    PIXEL_WRITER.get_or_init(|| GraphicWriter::new(frame_config))
+pub fn init_graphic(frame_config: FrameBufferConfig) {
+    PIXEL_WRITER.get_or_init(|| Mutex::new(GraphicWriter::new(frame_config)));
+}
+
+pub fn get_graphic() -> &'static Mutex<GraphicWriter> {
+    PIXEL_WRITER.get().unwrap()
 }
 
 unsafe impl Send for GraphicWriter {}

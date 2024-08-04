@@ -2,7 +2,7 @@ use keycode::{Key, KeySpecial};
 use log::debug;
 use usb::USBKeyboardDriver;
 
-use crate::{print, queue::ArrayQueue, sync::Mutex, task::schedule};
+use crate::{interrupt::without_interrupts, print, queue::ArrayQueue, sync::Mutex, task::schedule};
 
 mod keycode;
 mod manager;
@@ -22,17 +22,14 @@ impl Keyboard {
 
     pub fn usb(&self) -> USBKeyboardDriver {
         USBKeyboardDriver::new(|u8, key| unsafe {
-            QUEUE.lock().enqueue(key);
-            // if let Key::Ascii(byte) = key {
-            //     print!("{}", byte as char);
-            // }
+            without_interrupts(|| QUEUE.lock().enqueue(key));
         })
     }
 }
 
 pub fn get_code() -> Key {
     while QUEUE.lock().is_empty() {}
-    QUEUE.lock().dequeue().unwrap()
+    without_interrupts(|| QUEUE.lock().dequeue().unwrap())
 }
 
 pub fn getch() -> u8 {

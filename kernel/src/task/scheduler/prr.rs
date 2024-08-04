@@ -7,7 +7,7 @@ use crate::{
 };
 use core::ptr::NonNull;
 
-const PROCESSTIME_COUNT: u64 = 0x2;
+const PROCESSTIME_COUNT: u64 = 0x1;
 const NUM_OF_PRIORITY: usize = 4;
 const PRIORITY_SIZE: usize = u8::MAX as usize / NUM_OF_PRIORITY + 1;
 
@@ -18,6 +18,7 @@ pub struct PriorityRoundRobinScheduler {
     execute: [usize; NUM_OF_PRIORITY],
     process_count: u64,
     current_execute: usize,
+    last_fpu_used: Option<u64>,
 }
 
 impl PriorityRoundRobinScheduler {
@@ -29,6 +30,7 @@ impl PriorityRoundRobinScheduler {
             execute: [0; NUM_OF_PRIORITY],
             process_count: PROCESSTIME_COUNT,
             current_execute: 0,
+            last_fpu_used: None,
         }
     }
 
@@ -105,5 +107,13 @@ impl Schedulable for PriorityRoundRobinScheduler {
         let queue_idx = Self::get_priority(priority);
         self.queues[queue_idx].remove(NonNull::new(task).ok_or(())?);
         Ok(())
+    }
+
+    fn last_fpu_used(&self) -> Option<u64> {
+        self.last_fpu_used
+    }
+
+    fn set_fpu_used(&mut self, id: u64) {
+        self.last_fpu_used = Some(id);
     }
 }

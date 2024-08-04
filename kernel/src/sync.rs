@@ -27,8 +27,8 @@ pub struct OnceLock<T> {
 unsafe impl<T> Send for Mutex<T> {}
 unsafe impl<T> Sync for Mutex<T> {}
 
-unsafe impl<T: Send> Send for OnceLock<T> {}
-unsafe impl<T: Send> Sync for OnceLock<T> {}
+unsafe impl<T> Send for OnceLock<T> {}
+unsafe impl<T> Sync for OnceLock<T> {}
 
 impl<T> Mutex<T> {
     pub const fn new(inner: T) -> Self {
