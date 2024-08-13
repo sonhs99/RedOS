@@ -1,5 +1,9 @@
 use core::ptr::{read_volatile, write_volatile};
 
+use log::debug;
+
+use crate::{sync::OnceLock, timer::wait_ms};
+
 pub struct LocalAPICRegisters(u32);
 
 impl LocalAPICRegisters {
@@ -48,6 +52,8 @@ pub enum APICTimerMode {
     Periodic = 1,
 }
 
+static TICK_PER_100MILISECOND: OnceLock<u32> = OnceLock::new();
+const TICK_DIVIDER: u32 = 1000;
 pub struct APICTimer(u32);
 
 impl APICTimer {
@@ -56,17 +62,23 @@ impl APICTimer {
     const CURRENT_COUNTER: u32 = 0x390;
     const DIVIDER: u32 = 0x3E0;
 
-    const INIT_COUNTER_VALUE: u32 = 0x0001_0000;
+    const INIT_COUNTER_VALUE: u32 = 0xFFFF_FFFF;
+
     pub fn init(&self, divider: u8, mask: bool, mode: APICTimerMode, vector: u8) {
         let mut data = vector as u32;
         data |= (mask as u32) << 16;
         data |= (mode as u32) << 17;
+        self.start();
+        wait_ms(100);
+        let elapse = self.elapsed();
+        TICK_PER_100MILISECOND.get_or_init(|| elapse);
+        debug!("APIC Timer: {elapse} Tick/100ms");
         unsafe {
             write_volatile((self.0 + Self::DIVIDER) as *mut u32, divider as u32);
             write_volatile((self.0 + Self::LVT_TIMER) as *mut u32, data);
             write_volatile(
                 (self.0 + Self::INIT_COUNTER) as *mut u32,
-                Self::INIT_COUNTER_VALUE,
+                elapse / TICK_DIVIDER,
             );
         }
     }
@@ -84,5 +96,37 @@ impl APICTimer {
         unsafe {
             Self::INIT_COUNTER_VALUE - read_volatile((self.0 + Self::CURRENT_COUNTER) as *const u32)
         }
+    }
+
+    pub fn tick_count() -> u32 {
+        TICK_PER_100MILISECOND.get().unwrap() / TICK_DIVIDER
+    }
+}
+
+pub struct IOAPICRegister(u32);
+
+impl IOAPICRegister {
+    pub fn new(address: u32) -> Self {
+        Self(address)
+    }
+
+    pub fn read(&self, address: u8) -> u32 {
+        unsafe {
+            write_volatile(self.0 as *mut u32, address as u32);
+            read_volatile((self.0 + 0x10) as *const u32)
+        }
+    }
+
+    pub fn write(&self, address: u8, value: u32) {
+        unsafe {
+            write_volatile(self.0 as *mut u32, address as u32);
+            write_volatile((self.0 + 0x10) as *mut u32, value);
+        }
+    }
+}
+
+impl Default for IOAPICRegister {
+    fn default() -> Self {
+        Self(0xFEC0_0000)
     }
 }

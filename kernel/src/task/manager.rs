@@ -29,8 +29,7 @@ impl TaskManager {
         if self.use_count >= TASKPOOL_SIZE {
             return Err(());
         }
-        self.use_count += 1;
-        self.alloc_count = self.alloc_count.wrapping_add(1);
+
         let task = unsafe {
             if let Some(mut task) = self.empty_queue.pop() {
                 task.as_mut()
@@ -46,6 +45,9 @@ impl TaskManager {
         };
         task.id = self.alloc_count as u64;
         self.task_map.insert(task.id, NonNull::new(task).unwrap());
+
+        self.alloc_count = self.alloc_count.wrapping_add(1);
+        self.use_count += 1;
         Ok(task)
     }
 
@@ -67,7 +69,7 @@ impl TaskManager {
         // debug!("task_ptr = {task_ptr:?}");
         // Some(unsafe { self.task_map.get_mut(&id)?.as_mut() })
         self.task_map.iter_mut().find_map(|(&task_id, task)| {
-            if (task_id == id) {
+            if task_id == id {
                 unsafe { Some(task.as_mut()) }
             } else {
                 None

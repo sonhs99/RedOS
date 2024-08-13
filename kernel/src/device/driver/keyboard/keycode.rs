@@ -1,5 +1,5 @@
 #[repr(u8)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum KeySpecial {
     None = 0x00,
     Enter = b'\n',
@@ -40,7 +40,7 @@ pub enum KeySpecial {
     Pause = 0xA0,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Key {
     Ascii(u8),
     Special(KeySpecial),

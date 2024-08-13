@@ -1,13 +1,16 @@
 use core::{
     intrinsics::compare_bytes,
-    ptr::{read_unaligned, slice_from_raw_parts},
+    ptr::{addr_of, read_unaligned, slice_from_raw_parts},
     slice::Iter,
 };
 
 use bootloader::acpi::RSDP;
 use log::debug;
 
-use crate::sync::OnceLock;
+use crate::{
+    interrupt::{apic::IOAPICRegister, InterruptVector},
+    sync::OnceLock,
+};
 
 #[repr(C, packed)]
 pub struct DescriptionHeader {
@@ -85,6 +88,108 @@ pub struct FADT {
     _reserved3: [u8; 276 - 116],
 }
 
+impl FADT {
+    pub const fn timer(&self) -> u32 {
+        self.pm_tmr_blk
+    }
+
+    pub const fn flags(&self) -> u32 {
+        self.flags
+    }
+}
+
+#[repr(C, packed)]
+pub struct MADT {
+    header: DescriptionHeader,
+    lapic_addr: u32,
+    flags: u32,
+}
+
+#[repr(C, packed)]
+pub struct MADTHeader {
+    pub type_: u8,
+    pub length: u8,
+}
+
+impl MADT {
+    pub fn entries(&self) -> MADTIter {
+        let base = (self as *const Self).cast::<u8>();
+        let base = unsafe { base.add(size_of::<Self>()) };
+        MADTIter {
+            base,
+            idx: 0,
+            length: self.header.length,
+        }
+    }
+}
+pub struct MADTIter {
+    base: *const u8,
+    idx: u32,
+    length: u32,
+}
+
+impl Iterator for MADTIter {
+    type Item = &'static MADTHeader;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let header = unsafe { &*self.base.add(self.idx as usize).cast::<MADTHeader>() };
+        let endpoint = self.idx + header.length as u32;
+        if endpoint >= self.length {
+            return None;
+        }
+        self.idx = endpoint;
+        Some(header)
+    }
+}
+
+#[repr(C, packed)]
+pub struct LocalAPICEntry {
+    pub header: MADTHeader,
+    pub uid: u8,
+    pub id: u8,
+    pub flags: u32,
+}
+
+#[repr(C, packed)]
+pub struct IOAPICEntry {
+    pub header: MADTHeader,
+    pub id: u8,
+    _reserved: u8,
+    pub address: u32,
+    pub global_addr: u32,
+}
+
+#[repr(C, packed)]
+pub struct IntOverrideEntry {
+    pub header: MADTHeader,
+    pub bus: u8,
+    pub source: u8,
+    pub global_int: u32,
+    pub flags: u16,
+}
+
+#[repr(C, packed)]
+pub struct IntNMIOverrideEntry {
+    pub header: MADTHeader,
+    pub flags: u16,
+    pub global_int: u32,
+}
+
+#[repr(C, packed)]
+pub struct LocalOverrideEntry {
+    pub header: MADTHeader,
+    _reserved: u16,
+    pub address: u64,
+}
+
+#[repr(C, packed)]
+pub struct LocalNMIOverideEntry {
+    pub header: MADTHeader,
+    pub uid: u8,
+    pub flags: u16,
+    pub int: u8,
+}
+
 fn sum<T>(ptr: *const T, size: usize) -> u8 {
     sum_inner(ptr.cast::<u8>(), size)
 }
@@ -100,6 +205,7 @@ fn sum_inner(ptr: *const u8, size: usize) -> u8 {
 }
 
 pub static FADT_CELL: OnceLock<&FADT> = OnceLock::new();
+pub static MADT_CELL: OnceLock<&MADT> = OnceLock::new();
 
 pub fn initialize(rsdp: &RSDP) {
     if !rsdp.is_valid() {
@@ -111,13 +217,13 @@ pub fn initialize(rsdp: &RSDP) {
     }
 
     if let Some(fadt) = xsdt.entries().find(|&entry| entry.is_valid(b"FACP")) {
-        FADT_CELL.get_or_init(|| unsafe {
-            (fadt as *const DescriptionHeader)
-                .cast::<FADT>()
-                .as_ref()
-                .unwrap()
-        });
+        FADT_CELL.get_or_init(|| unsafe { &*(fadt as *const DescriptionHeader).cast::<FADT>() });
     } else {
         debug!("FADT is not found");
+    }
+    if let Some(madt) = xsdt.entries().find(|entry| entry.is_valid(b"APIC")) {
+        MADT_CELL.get_or_init(|| unsafe { &*(madt as *const DescriptionHeader).cast::<MADT>() });
+    } else {
+        debug!("MADT is not found");
     }
 }

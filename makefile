@@ -1,7 +1,8 @@
-QEMU := qemu-system-x86_64 -m 512M \
+QEMU := qemu-system-x86_64 -m 512M -smp 4\
     -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
     -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd \
     -drive format=raw,file=fat:rw:esp \
+	-hdb hdd.img \
 
 QEMU_USB := -device qemu-xhci \
     -device usb-kbd \
@@ -26,6 +27,9 @@ trace:
 
 dump:
 	objdump -d ./target/x86_64/debug/kernel > dump.txt
+
+hdd:
+	qemu-img create hdd.img 20M
 
 clean:
 	rm -rf target

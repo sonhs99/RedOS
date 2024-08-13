@@ -1,6 +1,6 @@
 *target
-bootloader/target
 /esp
 dump.txt
+hdd.img
 OVMF_CODE.fd
 OVMF_VARS.fd

@@ -14,18 +14,21 @@ pub mod console;
 pub mod device;
 pub mod float;
 pub mod font;
+pub mod fs;
 pub mod gdt;
 pub mod graphic;
 pub mod interrupt;
+pub mod ioapic;
 pub mod page;
 mod queue;
 pub mod sync;
 pub mod task;
+pub mod timer;
 pub mod window;
 
 use core::panic::PanicInfo;
 use log::error;
-use task::running_task;
+use task::{exit, running_task};
 
 #[repr(C, align(16))]
 pub struct KernelStack<const N: usize>([u8; N]);
@@ -57,7 +60,7 @@ macro_rules! entry_point {
     ($path:path) => {
         const _: () = {
             use kernel::KernelStack;
-            const KERNEL_STACK: KernelStack<0x100000> = KernelStack::new();
+            const KERNEL_STACK: KernelStack<0x10_0000> = KernelStack::new();
 
             #[export_name = "_start"]
             pub unsafe extern "sysv64" fn __impl_start(boot_info: BootInfo) -> ! {
@@ -78,6 +81,13 @@ macro_rules! entry_point {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    error!("in Task {}\n{}", running_task().id(), info);
+    if let Some(running) = running_task() {
+        error!("PID={}\n{}", running.id(), info);
+        if running.id() > 2 {
+            exit();
+        }
+    } else {
+        error!("{}", info);
+    }
     loop {}
 }

@@ -3,8 +3,8 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, vec};
-use core::arch::asm;
+use alloc::{boxed::Box, format, string::String, vec};
+use core::{arch::asm, iter::empty, str};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -12,7 +12,11 @@ use kernel::{
     allocator::init_heap,
     console::{init_console, Console},
     device::{
-        driver::keyboard::{getch, Keyboard},
+        driver::keyboard::{get_code, getch, Keyboard},
+        hdd::{
+            pata::{get_device, init_pata},
+            Block,
+        },
         pci::{
             init_pci,
             msi::{Message, Msi},
@@ -24,17 +28,20 @@ use kernel::{
     entry_point,
     float::set_ts,
     font::write_ascii,
+    fs::{self, dev_list, format_by_name, init_fs, mount, open, open_dir},
     gdt::init_gdt,
     graphic::{get_graphic, init_graphic, GraphicWriter, PixelColor, PIXEL_WRITER},
     interrupt::{
-        apic::{APICTimerMode, LocalAPICId, LocalAPICRegisters},
+        apic::{APICTimerMode, IOAPICRegister, LocalAPICId, LocalAPICRegisters},
         init_idt, set_interrupt, without_interrupts, InterruptVector,
     },
+    ioapic,
     page::init_page,
     print, println,
     task::{create_task, exit, idle, init_task, running_task, schedule, TaskFlags},
+    timer::init_pm,
 };
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 
 entry_point!(kernel_main);
 
@@ -64,12 +71,21 @@ fn kernel_main(boot_info: BootInfo) {
     init_task();
     info!("Task Management Initialized");
 
+    init_fs();
+    info!("Root File System Initialized");
+
     // Do Not Use
     // set_ts();
     // info!("Lazy FP Enable");
 
     acpi::initialize(boot_info.rsdp);
     info!("ACPI Initialized");
+
+    ioapic::init();
+    info!("I/O APIC Initialized");
+
+    init_pm();
+    info!("ACPI PM Timer Initialized");
 
     LocalAPICRegisters::default().apic_timer().init(
         0b1011,
@@ -78,10 +94,12 @@ fn kernel_main(boot_info: BootInfo) {
         InterruptVector::APICTimer as u8,
     );
     set_interrupt(true);
-
     info!("Enable APIC Timer Interrupt");
+
     info!("PCI Init Started");
     init_pci();
+
+    // create_task(TaskFlags::new(), test as u64, 0, 0);
 
     match PciSearcher::new()
         .base(Base::Serial)
@@ -106,9 +124,8 @@ fn kernel_main(boot_info: BootInfo) {
             }
 
             without_interrupts(|| {
-                let lapic_id = LocalAPICRegisters::default().local_apic_id().id();
                 let msg = Message::new()
-                    .destionation_id(lapic_id)
+                    .destionation_id(0xFF)
                     .interrupt_index(InterruptVector::XHCI as u8)
                     .level(true)
                     .trigger_mode(true)
@@ -138,8 +155,59 @@ fn kernel_main(boot_info: BootInfo) {
         }
         None => {}
     }
-    info!("{}/{} = {}", width, height, width as f64 / height as f64);
-    create_task(TaskFlags::new(), test as u64, 0, 0);
+    match PciSearcher::new()
+        .base(Base::MassStorage)
+        .sub(Sub::IDE)
+        .interface(Interface::None)
+        .search()
+        .expect("No IDE device detected")
+        .first()
+    {
+        Some(ide_dev) => {
+            info!(
+                "IDE has been found: {}.{}.{}",
+                ide_dev.bus, ide_dev.dev, ide_dev.func
+            );
+            init_pata();
+            for i in 0..4 {
+                if i == 0 {
+                    continue;
+                }
+                if let Ok(hdd) = get_device(i) {
+                    info!("PATA:{i} Detected");
+                    // create_task(TaskFlags::new(), test_hdd as u64, 0, 0);
+                    let dev_name = format!("pata{i}");
+                    if let Ok(fs_count) = mount(hdd, &dev_name) {
+                        info!("PATA:{i} mounted, fs_count={fs_count}");
+                        if fs_count == 0 {
+                            if let Err(reason) = format_by_name(&dev_name, 1024 * 1024 * 10 / 512) {
+                                info!("PATA:{i} format failed");
+                                info!("{}", reason);
+                            } else {
+                                info!("PATA:{i} formated");
+                            }
+                        }
+                    }
+                    let mut count = 0;
+                    let file = open(&dev_name, 0, "/file", b"w").expect("File Open Failed");
+                    let root = open_dir(&dev_name, 0, "/", b"r")
+                        .expect("Attempt to Open Root Directory Failed");
+                    for (idx, entry) in root.entries() {
+                        info!("[{idx}] /{entry}");
+                        count += 1;
+                    }
+                    info!("Total {count} entries");
+                } else {
+                    info!("PATA:{i} Not Detected");
+                }
+            }
+
+            for (idx, dev_name) in dev_list().iter().enumerate() {
+                info!("[{idx}] {dev_name}");
+            }
+        }
+        None => {}
+    }
 }
 
 fn print_input() {
@@ -148,19 +216,121 @@ fn print_input() {
     }
 }
 
+fn test_hdd() {
+    let mut buffer: [Block<512>; 1] = [const { Block::empty() }; 1];
+    let mut hdd = get_device(1).expect("Cannot find HDD");
+    info!("PATA HDD Test Start");
+    info!("1. Read");
+    for lba in 0..4 {
+        hdd.read_block(lba, &mut buffer).expect("HDD Read Failed");
+        for (lba_offset, block) in buffer.iter().enumerate() {
+            for idx in 0..512 {
+                if idx % 16 == 0 {
+                    print!(
+                        "\nLBA={:2X}, offset={:3X}    |",
+                        lba + lba_offset as u32,
+                        idx
+                    )
+                }
+                print!("{:02X} ", block.get::<u8>(idx));
+            }
+            println!();
+        }
+    }
+
+    // info!("2. Write");
+    // for block in buffer.iter_mut() {
+    //     for idx in 0..512 {
+    //         *block.get_mut(idx) = idx as u8;
+    //     }
+    // }
+    // write_block(1, 0, &buffer).expect("HDD Write Failed");
+    // read_block(1, 0, &mut buffer).expect("HDD Read Failed");
+    // for (lba, block) in buffer.iter().enumerate() {
+    //     for idx in 0..512 {
+    //         if idx % 16 == 0 {
+    //             print!("\nLBA={:2X}, offset={:3X}    |", lba, idx)
+    //         }
+    //         print!("{:02X} ", block.get::<u8>(idx));
+    //     }
+    //     println!();
+    // }
+}
+
+fn test_hdd_rw() {
+    let mut buffer: [Block<512>; 1] = [Block::empty(); 1];
+    let mut pattern: [[Block<512>; 1]; 4] = [const { [Block::empty(); 1] }; 4];
+
+    let hdd = get_device(1).expect("Cannot find HDD");
+
+    for block in pattern[0].iter_mut() {
+        for idx in 0..512 {
+            *block.get_mut(idx) = idx as u8;
+        }
+    }
+
+    for block in pattern[1].iter_mut() {
+        for idx in 0..512 {
+            *block.get_mut(idx) = (idx as u8) % 16;
+        }
+    }
+
+    for block in pattern[2].iter_mut() {
+        for idx in 0..512 {
+            *block.get_mut(idx) = (idx as u8) % 2;
+        }
+    }
+
+    for block in pattern[3].iter_mut() {
+        for idx in 0..512 {
+            if idx % 4 == 0 {
+                *block.get_mut(idx) = 1;
+            }
+        }
+    }
+
+    let mut flag = false;
+    info!("PATA HDD Read/Write Test Start");
+    for (lba, pattern_buffer) in pattern.iter().enumerate() {
+        info!("Pattern {}", lba + 1);
+        hdd.write_block(lba as u32, pattern_buffer)
+            .expect("HDD Write Failed");
+        hdd.read_block(lba as u32, &mut buffer)
+            .expect("HDD Read Failed");
+        for idx in 0..512 {
+            if *pattern_buffer[0].get::<u8>(idx) != *buffer[0].get::<u8>(idx) {
+                flag = true;
+                break;
+            }
+        }
+        if flag {
+            error!("Test Failed");
+            for (pattern_block, block) in pattern_buffer.iter().zip(buffer.iter()) {
+                for idx in 0..512 * 2 {
+                    let offset = idx & 0x0F | (idx & !0x1F) >> 1;
+                    if idx % 16 == 0 {
+                        if idx % 32 == 0 {
+                            print!("\nLBA={:2X}, offset={:3X}  |", lba as u32, idx)
+                        } else {
+                            print!(" |  ")
+                        }
+                    }
+                    if (idx >> 4) & 0x01 == 0 {
+                        print!("{:02X} ", block.get::<u8>(offset));
+                    } else {
+                        print!("{:02X} ", pattern_block.get::<u8>(offset));
+                    }
+                }
+                println!();
+            }
+            return;
+        }
+    }
+    info!("Test Success");
+}
+
 fn test() {
     for i in 0..50 {
-        create_task(TaskFlags::new().thread().clone(), test_thread as u64, 0, 0);
-        // create_task(TaskFlags::new().thread().clone(), test_fpu as u64, 0, 0);
-        // create_task(
-        //     TaskFlags::new().thread().clone(),
-        //     test_windmill as u64,
-        //     0,
-        //     0,
-        // );
-        // info!("Thread {i} created");
-    }
-    for i in 0..100 {
         create_task(
             TaskFlags::new().thread().set_priority(66).clone(),
             test_thread as u64,
@@ -168,11 +338,29 @@ fn test() {
             0,
         );
     }
-    loop {}
+    for i in 0..50 {
+        create_task(
+            TaskFlags::new().thread().set_priority(130).clone(),
+            test_thread as u64,
+            0,
+            0,
+        );
+    }
+    for i in 0..50 {
+        create_task(
+            TaskFlags::new().thread().set_priority(200).clone(),
+            test_thread as u64,
+            0,
+            0,
+        );
+    }
+    loop {
+        schedule();
+    }
 }
 
 fn test_fpu() {
-    let id = running_task().id() + 1;
+    let id = running_task().unwrap().id() + 1;
     let mut count = 1.0f64;
 
     for i in 0..10 {
@@ -194,7 +382,7 @@ fn test_fpu() {
 }
 
 fn test_thread() {
-    let id = running_task().id() + 1;
+    let id = running_task().unwrap().id() + 1;
     let mut random = id;
     let mut value1 = 1f64;
     let mut value2 = 1f64;
@@ -244,7 +432,7 @@ fn test_thread() {
 }
 
 fn test_windmill() {
-    let id = running_task().id() + 1;
+    let id = running_task().unwrap().id() + 1;
     let data = [b'-', b'\\', b'|', b'/'];
     let offset = id * 2;
     let offset_x = id % 80 + 80;

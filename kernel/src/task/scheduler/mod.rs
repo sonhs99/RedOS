@@ -27,8 +27,4 @@ pub trait Schedulable {
     fn tick(&mut self);
     fn reset_tick(&mut self);
     fn is_expired(&self) -> bool;
-
-    // FPU
-    fn last_fpu_used(&self) -> Option<u64>;
-    fn set_fpu_used(&mut self, id: u64);
 }

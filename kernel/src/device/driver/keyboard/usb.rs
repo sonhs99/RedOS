@@ -4,6 +4,7 @@ use super::{
 };
 use crate::device::xhc::driver::{ClassDriverOperate, DriverType};
 use alloc::{rc::Rc, vec::Vec};
+use log::error;
 
 const COMBINE_KEY_LSHIFT: u8 = 0b0000_0010;
 const COMBINE_KEY_RSHIFT: u8 = 0b0010_0000;
@@ -248,8 +249,8 @@ impl USBKeyboardDriver {
     pub fn keycodes(&mut self) -> Vec<Key> {
         let pressed: Vec<Key> = self.data_buff[2..]
             .iter()
-            .filter(|keycode| !self.prev_buff[2..].contains(keycode))
-            .map(|keycode| self.keycode(*keycode))
+            .filter(|&keycode| !self.prev_buff[2..].contains(keycode))
+            .map(|&keycode| self.keycode(keycode))
             .collect();
         // for key in pressed.iter() {
         //     self.manager.update_key_status(key);

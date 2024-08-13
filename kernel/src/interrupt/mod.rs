@@ -15,8 +15,11 @@ pub use asm::{set_interrupt, without_interrupts};
 
 #[repr(u8)]
 pub enum InterruptVector {
+    PATA1 = 0x2E,
+    PATA2 = 0x2F,
     XHCI = 0x40,
     APICTimer = 0x41,
+    IRQStart = 0x20,
 }
 
 static IDT: OnceLock<EntryTable> = OnceLock::new();
@@ -29,6 +32,14 @@ pub fn init_idt() {
         for i in 0..16 {
             idt.set_handler(i, handler_without_err_code!(common_exception))
                 .set_option(option);
+        }
+
+        for i in 0..16 {
+            idt.set_handler(
+                i + InterruptVector::IRQStart as u8,
+                handler_without_err_code!(irq_dummy_handler),
+            )
+            .set_option(option);
         }
 
         idt.set_handler(0, handler_without_err_code!(divided_by_zero))
@@ -47,10 +58,22 @@ pub fn init_idt() {
             .set_option(option);
 
         idt.set_handler(
+            InterruptVector::PATA1 as u8,
+            handler_without_err_code!(pata1_handler),
+        )
+        .set_option(option);
+        idt.set_handler(
+            InterruptVector::PATA2 as u8,
+            handler_without_err_code!(pata2_handler),
+        )
+        .set_option(option);
+
+        idt.set_handler(
             InterruptVector::XHCI as u8,
             handler_without_err_code!(xhc_handler),
         )
         .set_option(option);
+
         idt.set_handler(
             InterruptVector::APICTimer as u8,
             handler_with_context!(apic_timer_handler),

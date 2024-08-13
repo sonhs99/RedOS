@@ -24,7 +24,7 @@ pub struct ConsoleLogger;
 
 impl Console {
     pub const Rows: usize = 50;
-    pub const Columns: usize = 80;
+    pub const Columns: usize = 160;
     pub const fn new(bg_color: PixelColor, fg_color: PixelColor) -> Self {
         Self {
             bg_color,
@@ -71,13 +71,11 @@ impl Console {
         if (self.cursor_row as usize) < Console::Rows - 1 {
             self.cursor_row += 1
         } else {
-            for y in 0..16 * Console::Rows {
-                for x in 0..8 * Console::Columns {
-                    get_graphic().lock().write(x, y, self.bg_color);
-                }
-            }
-            for row in 0..(Console::Rows - 1) {
+            for row in 0..self.cursor_row as usize {
                 for column in 0..(Console::Columns + 1) {
+                    if self.buffer[row][column] == 0 && self.buffer[row + 1][column] == 0 {
+                        break;
+                    }
                     let c = self.buffer[row + 1][column];
                     self.buffer[row][column] = c;
                     write_ascii(
@@ -91,6 +89,13 @@ impl Console {
             }
             for column in 0..(Console::Columns + 1) {
                 self.buffer[Console::Rows - 1][column] = 0;
+                write_ascii(
+                    8 * column as u64,
+                    16 * self.cursor_row as u64,
+                    b' ',
+                    self.fg_color,
+                    self.bg_color,
+                );
             }
         }
     }

@@ -4,6 +4,7 @@ use super::{PciDevice, PCI_BUS};
 
 pub enum Base {
     Serial,
+    MassStorage,
 }
 
 impl Base {
@@ -11,6 +12,7 @@ impl Base {
     pub const fn as_u8(self) -> Option<u8> {
         match self {
             Self::Serial => Some(0x0C),
+            Self::MassStorage => Some(0x01),
             _ => None,
         }
     }
@@ -18,6 +20,7 @@ impl Base {
 
 pub enum Sub {
     USB,
+    IDE,
 }
 
 impl Sub {
@@ -25,6 +28,7 @@ impl Sub {
     pub const fn as_u8(self) -> Option<u8> {
         match self {
             Self::USB => Some(0x03),
+            Self::IDE => Some(0x01),
             _ => None,
         }
     }
@@ -35,6 +39,7 @@ pub enum Interface {
     OHCI,
     EHCI,
     XHCI,
+    None,
 }
 
 impl Interface {
@@ -44,6 +49,7 @@ impl Interface {
             Self::OHCI => Some(0x10),
             Self::EHCI => Some(0x20),
             Self::XHCI => Some(0x30),
+            Self::None => Some(0xFF),
             _ => None,
         }
     }

@@ -5,7 +5,7 @@ pub mod search;
 use super::Port;
 use crate::sync::{Mutex, OnceLock};
 use capability::{CapabilityRegister, CapabilityRegisterIter};
-use log::debug;
+use log::{debug, info};
 use search::{Base, Interface, PciSearcher, Sub};
 
 pub struct Pci {
@@ -70,7 +70,7 @@ impl Pci {
 
     pub fn read_header_type(bus: u8, device: u8, function: u8) -> u8 {
         Self::write_address(make_address(bus, device, function, 0x0C));
-        (Self::read_data() >> 8) as u8
+        (Self::read_data() >> 16) as u8
     }
 
     pub fn read_class_code(bus: u8, device: u8, function: u8) -> PciClass {
@@ -116,7 +116,6 @@ impl Pci {
         if header_type & 0x80 == 0 {
             return Ok(());
         }
-
         for func in 1..8 {
             if Self::read_vendor_id(bus, device, func) == 0xffff {
                 debug!("{bus}.{device}.{func}");
@@ -206,7 +205,7 @@ impl PciDevice {
 
 impl PciClass {
     pub fn is_class(&self, base: u8, sub: u8, interface: u8) -> bool {
-        self.base == base && self.sub == sub && self.interface == interface
+        self.base == base && self.sub == sub && (self.interface == interface || interface == 0xFF)
     }
 }
 
@@ -252,7 +251,7 @@ pub fn init_pci() {
     for dev in pci.lock().device_iter() {
         let vendor_id = dev.read_vendor_id();
         let class_code = dev.class_code;
-        debug!(
+        info!(
             "Address {}.{}.{}: vend {:04X}, class {:02X}{:02X}{:02X}{:02X}, head {:02x}",
             dev.bus,
             dev.dev,

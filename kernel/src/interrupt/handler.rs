@@ -1,15 +1,15 @@
-use core::arch::asm;
+use core::{arch::asm, hint::black_box};
 
 use log::debug;
 
 use crate::{
-    device::xhc::XHC,
+    device::{hdd::pata::set_interrupt_flag, xhc::XHC},
     float::{clear_ts, fpu_init, fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
     println,
     task::{
-        decrease_tick, get_task_from_id, is_expired, last_fpu_used, running_task, schedule_int,
-        scheduler::Schedulable, set_fpu_used, Context, SCHEDULER,
+        decrease_tick, exit, get_task_from_id, is_expired, running_task, schedule_int,
+        scheduler::Schedulable, Context, SCHEDULER,
     },
 };
 
@@ -277,8 +277,18 @@ pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
 // }
 
 pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
-    loop {}
+    if let Some(running) = running_task() {
+        println!("[EXCEP]: PID={}", running.id());
+        println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
+        if running.id() > 2 {
+            exit();
+        } else {
+            loop {}
+        }
+    } else {
+        println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
+        loop {}
+    }
 }
 
 pub extern "C" fn double_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
@@ -308,8 +318,23 @@ pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
 pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
     decrease_tick();
     if is_expired() {
-        // debug!("timer");
         schedule_int(current_context);
     }
+    LocalAPICRegisters::default().end_of_interrupt().notify();
+}
+
+pub extern "C" fn pata1_handler(stack_frame: &ExceptionStackFrame) {
+    // println!("[INTER]: PATA1");
+    black_box(set_interrupt_flag(true));
+    LocalAPICRegisters::default().end_of_interrupt().notify();
+}
+
+pub extern "C" fn pata2_handler(stack_frame: &ExceptionStackFrame) {
+    // println!("[INTER]: PATA2");
+    black_box(set_interrupt_flag(false));
+    LocalAPICRegisters::default().end_of_interrupt().notify();
+}
+
+pub extern "C" fn irq_dummy_handler(stack_frame: &ExceptionStackFrame) {
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }

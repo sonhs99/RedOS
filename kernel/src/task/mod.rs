@@ -105,6 +105,8 @@ impl Task {
         context.rflags |= 0x0200;
         unsafe { *(context.rsp as *mut u64) = exit_inner as u64 };
 
+        // unsafe { *(stack_addr as *mut u32) = 0xdeadbeef };
+
         let mut fpu_context = FPUContext::new();
         unsafe { *(fpu_context.get(24).cast::<u16>()) = 0x1f80 };
 
@@ -124,6 +126,10 @@ impl Task {
             memory_size,
         }
     }
+
+    // pub fn corrupted(&self) -> bool {
+    //     unsafe { *(self.stack_addr as *const u32) != 0xdeadbeef }
+    // }
 
     pub const fn id(&self) -> u64 {
         self.id
@@ -372,14 +378,6 @@ pub fn schedule() {
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
 
-        if scheduler
-            .last_fpu_used()
-            .is_some_and(|last| last != running_task.id)
-        {
-            set_ts();
-        } else {
-            clear_ts();
-        }
         if running_task.flags.is_terminated() {
             scheduler.push_wait(running_task);
         } else {
@@ -400,14 +398,7 @@ pub fn schedule_int(context: &mut Context) {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
-        if scheduler
-            .last_fpu_used()
-            .is_some_and(|last| last != running_task.id)
-        {
-            set_ts();
-        } else {
-            clear_ts();
-        }
+
         if running_task.flags.is_terminated() {
             scheduler.push_wait(running_task);
         } else {
@@ -503,7 +494,7 @@ pub fn end_task(id: u64) {
             without_interrupts(|| {
                 error!("Task {id} Not Found");
                 for task_ in manager.iter() {
-                    debug!("id={}, Task {}, flag={}", id, task_.id, id = task_.id);
+                    debug!("id={}, Task {}, flag={}", id, task_.id, id == task_.id);
                 }
             });
             loop {}
@@ -533,16 +524,8 @@ fn exit_inner() {
     end_task(running_task.id);
 }
 
-pub fn set_fpu_used(id: u64) {
-    SCHEDULER.lock().set_fpu_used(id);
-}
-
-pub fn last_fpu_used() -> Option<u64> {
-    SCHEDULER.lock().last_fpu_used()
-}
-
-pub fn running_task() -> &'static mut Task {
-    unsafe { SCHEDULER.lock().running_task().unwrap().as_mut() }
+pub fn running_task() -> Option<&'static mut Task> {
+    unsafe { Some(SCHEDULER.lock().running_task()?.as_mut()) }
 }
 
 pub fn get_task_from_id(id: u64) -> Option<&'static mut Task> {
