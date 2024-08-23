@@ -5,11 +5,14 @@
 #![feature(generic_nonzero)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
+#![allow(warnings)]
 
 extern crate alloc;
 
 pub mod acpi;
 pub mod allocator;
+pub mod ap;
+pub mod cache;
 pub mod console;
 pub mod device;
 pub mod float;
@@ -21,7 +24,7 @@ pub mod interrupt;
 pub mod ioapic;
 pub mod page;
 mod queue;
-pub mod sync;
+mod sync;
 pub mod task;
 pub mod timer;
 pub mod window;
@@ -30,43 +33,15 @@ use core::panic::PanicInfo;
 use log::error;
 use task::{exit, running_task};
 
-#[repr(C, align(16))]
-pub struct KernelStack<const N: usize>([u8; N]);
-
-impl<const N: usize> KernelStack<N> {
-    #[inline(always)]
-    pub const fn new() -> Self {
-        Self([0; N])
-    }
-
-    #[inline(always)]
-    pub fn end_addr(&self) -> u64 {
-        self.0.as_ptr() as u64 + N as u64
-    }
-
-    #[inline(always)]
-    pub fn start_addr(&self) -> u64 {
-        self.0.as_ptr() as u64
-    }
-
-    #[inline(always)]
-    pub fn size() -> usize {
-        N
-    }
-}
-
 #[macro_export]
 macro_rules! entry_point {
     ($path:path) => {
         const _: () = {
-            use kernel::KernelStack;
-            const KERNEL_STACK: KernelStack<0x10_0000> = KernelStack::new();
-
             #[export_name = "_start"]
             pub unsafe extern "sysv64" fn __impl_start(boot_info: BootInfo) -> ! {
                 use core::arch::asm;
                 let f: fn(BootInfo) = $path;
-                let stack_start_addr = KERNEL_STACK.end_addr();
+                let stack_start_addr = boot_info.stack_frame.0 + boot_info.stack_frame.1 as u64;
 
         asm!("mov rsp, {0}", in(reg) stack_start_addr);
                 f(boot_info);
@@ -83,7 +58,7 @@ macro_rules! entry_point {
 fn panic(info: &PanicInfo) -> ! {
     if let Some(running) = running_task() {
         error!("PID={}\n{}", running.id(), info);
-        if running.id() > 2 {
+        if running.id() > 1 {
             exit();
         }
     } else {

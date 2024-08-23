@@ -6,6 +6,7 @@ use alloc::boxed::Box;
 use crate::sync::{Mutex, MutexGuard};
 
 pub mod pata;
+pub mod ram;
 
 #[derive(Clone)]
 pub struct Block<const N: usize>([u8; N]);
@@ -42,6 +43,12 @@ impl<const N: usize> Block<N> {
     pub fn get_mut<T>(&mut self, index: usize) -> &mut T {
         let ptr = self.0.as_mut_ptr().cast::<T>();
         unsafe { &mut *ptr.add(index) }
+    }
+}
+
+impl<const N: usize> Default for Block<N> {
+    fn default() -> Self {
+        Self([0u8; N])
     }
 }
 

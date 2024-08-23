@@ -11,7 +11,7 @@ use hashbrown::HashMap;
 use log::debug;
 
 use crate::{
-    device::hdd::{Block, BlockIO},
+    device::block::{Block, BlockIO},
     sync::{Mutex, OnceLock},
 };
 
@@ -71,6 +71,8 @@ trait FileSystem {
 
     fn remove_dir(&mut self, device: &mut dyn BlockIO, dir: DirectoryDescriptor) -> Result<(), ()>;
     fn root_dir(&mut self, device: &mut dyn BlockIO) -> Result<DirectoryDescriptor, ()>;
+
+    fn flush(&mut self, device: &mut dyn BlockIO);
 }
 
 pub(crate) struct FileDescriptor {
@@ -92,6 +94,20 @@ pub struct File {
     file_desc: FileDescriptor,
     dev_name: String,
     port: u16,
+}
+
+impl File {
+    pub fn remove(mut self) -> Result<(), ()> {
+        ROOT_FS.lock().remove_file(self)
+    }
+
+    pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize, usize> {
+        ROOT_FS.lock().read_file(self, buffer)
+    }
+
+    pub fn write(&mut self, buffer: &[u8]) -> Result<usize, usize> {
+        ROOT_FS.lock().write_file(self, buffer)
+    }
 }
 
 pub struct Directory {
@@ -129,6 +145,7 @@ impl RootFS {
         &mut self,
         mut device: impl BlockIO + 'static,
         dev_name: &str,
+        use_cache: bool,
     ) -> Result<usize, ()> {
         let mut buffer: Vec<Block<512>> = vec![Block::empty()];
         device.read(0, &mut buffer).map_err(|err| ())?;
@@ -146,7 +163,9 @@ impl RootFS {
                 device.read(0, &mut vbr).map_err(|err| ())?;
                 match fat::fat_type(&vbr[0]) {
                     fat::FATType::FAT32 => {
-                        if let Ok(fs) = FAT32::mount(&mut device, start_addr, volume_size) {
+                        if let Ok(fs) =
+                            FAT32::mount(&mut device, start_addr, volume_size, use_cache)
+                        {
                             file_systems.push(Box::new(fs));
                             count += 1;
                         }
@@ -165,10 +184,17 @@ impl RootFS {
         Ok(count)
     }
 
-    pub fn format_by_name(&mut self, dev_name: &str, size: u32) -> Result<(), &'static str> {
+    pub fn format_by_name(
+        &mut self,
+        dev_name: &str,
+        size: u32,
+        use_cache: bool,
+    ) -> Result<(), &'static str> {
         let entry = self.tree.get_mut(dev_name).ok_or("Device Not Found")?;
         let mut buffer: Block<512> = Block::empty();
         let start_address = 3;
+        let max_size = entry.device.lock().max_addr() - start_address;
+        let size = if size > max_size { max_size } else { size };
         entry
             .device
             .lock()
@@ -183,7 +209,7 @@ impl RootFS {
         mbr.set_partition(0, partition);
         entry.device.write(0, slice::from_ref(&buffer));
 
-        let fs = FAT32::format(&mut entry.device, start_address, size)
+        let fs = FAT32::format(&mut entry.device, start_address, size, use_cache)
             .map_err(|err| "File System Format Failed")?;
         entry.file_systems.insert(0, Box::new(fs));
         Ok(())
@@ -197,10 +223,11 @@ impl RootFS {
         let entry = self.tree.get_mut(dev_name).ok_or(())?;
         let fs = entry.file_systems.get_mut(port as usize).ok_or(())?;
         let mut dir = fs.root_dir(&mut entry.device)?;
-        let splited_path: Vec<&str> = path[1..].split('/').collect();
-        debug!("path={:?}", splited_path);
+        let splited_path: Vec<&str> = path.split('/').collect();
+        // debug!("path={:?}", splited_path);
+        // loop {}
         let file_name = splited_path.last().ok_or(())?;
-        for dir_name in splited_path.iter().rev().skip(1).rev() {
+        for dir_name in splited_path.iter().skip(1).rev().skip(1).rev() {
             dir = fs.open_dir(&mut entry.device, &dir, dir_name)?;
         }
         let file = fs.create(&mut entry.device, &dir, file_name)?;
@@ -228,16 +255,16 @@ impl RootFS {
         })
     }
 
-    pub fn remove_file(&mut self, dev_name: &str, port: u16, file: File) -> Result<(), ()> {
-        let entry = self.tree.get_mut(dev_name).ok_or(())?;
-        let fs = entry.file_systems.get_mut(port as usize).ok_or(())?;
+    pub fn remove_file(&mut self, file: File) -> Result<(), ()> {
+        let entry = self.tree.get_mut(&file.dev_name).ok_or(())?;
+        let fs = entry.file_systems.get_mut(file.port as usize).ok_or(())?;
         fs.remove(&mut entry.device, file.file_desc)?;
         Ok(())
     }
 
-    pub fn shrink_file(&mut self, dev_name: &str, port: u16, file: &mut File) -> Result<(), ()> {
-        let entry = self.tree.get_mut(dev_name).ok_or(())?;
-        let fs = entry.file_systems.get_mut(port as usize).ok_or(())?;
+    pub fn shrink_file(&mut self, file: &mut File) -> Result<(), ()> {
+        let entry = self.tree.get_mut(&file.dev_name).ok_or(())?;
+        let fs = entry.file_systems.get_mut(file.port as usize).ok_or(())?;
         fs.shrink(&mut entry.device, &mut file.file_desc)?;
         Ok(())
     }
@@ -282,11 +309,37 @@ impl RootFS {
         })
     }
 
-    pub fn remove_dir(&mut self, dev_name: &str, port: u16, dir: Directory) -> Result<(), ()> {
-        let entry = self.tree.get_mut(dev_name).ok_or(())?;
-        let fs = entry.file_systems.get_mut(port as usize).ok_or(())?;
+    pub fn remove_dir(&mut self, dir: Directory) -> Result<(), ()> {
+        let entry = self.tree.get_mut(&dir.dev_name).ok_or(())?;
+        let fs = entry.file_systems.get_mut(dir.port as usize).ok_or(())?;
         fs.remove_dir(&mut entry.device, dir.dir_desc)?;
         Ok(())
+    }
+
+    pub fn read_file(&mut self, file: &mut File, buffer: &mut [u8]) -> Result<usize, usize> {
+        let entry = self.tree.get_mut(&file.dev_name).ok_or(0usize)?;
+        let fs = entry
+            .file_systems
+            .get_mut(file.port as usize)
+            .ok_or(0usize)?;
+        fs.read(&mut entry.device, &mut file.file_desc, buffer)
+    }
+
+    pub fn write_file(&mut self, file: &mut File, buffer: &[u8]) -> Result<usize, usize> {
+        let entry = self.tree.get_mut(&file.dev_name).ok_or(0usize)?;
+        let fs = entry
+            .file_systems
+            .get_mut(file.port as usize)
+            .ok_or(0usize)?;
+        fs.write(&mut entry.device, &mut file.file_desc, buffer)
+    }
+
+    pub fn flush(&mut self) {
+        for entry in self.tree.values_mut() {
+            for fs in entry.file_systems.iter_mut() {
+                fs.flush(&mut entry.device);
+            }
+        }
     }
 }
 
@@ -296,12 +349,12 @@ pub fn init_fs() {
     ROOT_FS.get_or_init(|| Mutex::new(RootFS::new()));
 }
 
-pub fn mount(device: impl BlockIO + 'static, dev_name: &str) -> Result<usize, ()> {
-    ROOT_FS.lock().mount(device, dev_name)
+pub fn mount(device: impl BlockIO + 'static, dev_name: &str, use_cache: bool) -> Result<usize, ()> {
+    ROOT_FS.lock().mount(device, dev_name, use_cache)
 }
 
-pub fn format_by_name(dev_name: &str, size: u32) -> Result<(), &'static str> {
-    ROOT_FS.lock().format_by_name(dev_name, size)
+pub fn format_by_name(dev_name: &str, size: u32, use_cache: bool) -> Result<(), &'static str> {
+    ROOT_FS.lock().format_by_name(dev_name, size, use_cache)
 }
 
 pub fn dev_list() -> Vec<String> {
@@ -327,26 +380,19 @@ pub fn open(dev_name: &str, port: u16, file_name: &str, mode: &[u8]) -> Result<F
     write = write || append;
     debug!("read={read}, write={write}, append={append}");
     let mut search = ROOT_FS.lock().open_file(dev_name, port, file_name);
+    debug!("{}", search.is_ok());
     let mut file = match search {
         Ok(mut file) => {
-            debug!("asdf");
             if write {
                 ROOT_FS
                     .lock()
-                    .shrink_file(dev_name, port, &mut file)
+                    .shrink_file(&mut file)
                     .map_err(|err| "File Shrink Failed")?;
-                debug!("File Shrinked");
-                file
-                // ROOT_FS
-                //     .lock()
-                //     .create_file(dev_name, port, file_name)
-                //     .map_err(|err| "File Create Failed")?
-            } else {
-                file
+                debug!("File has been Shrinked");
             }
+            file
         }
         Err(_) => {
-            debug!("fdsa");
             if write {
                 ROOT_FS
                     .lock()
@@ -381,7 +427,7 @@ pub fn open_dir(
         }
     }
     write = write || append;
-    debug!("read={read}, write={write}, append={append}");
+    // debug!("read={read}, write={write}, append={append}");
     let mut search = ROOT_FS.lock().open_dir(dev_name, port, dir_name);
     let mut dir = match search {
         Ok(dir) => dir,
@@ -397,4 +443,8 @@ pub fn open_dir(
         }
     };
     Ok(dir)
+}
+
+pub fn flush() {
+    ROOT_FS.lock().flush();
 }

@@ -22,9 +22,10 @@ impl IOAPICRedirectionTable {
     }
 }
 
-pub fn init() {
+pub fn init() -> usize {
     let madt = *MADT_CELL.get().unwrap();
     let ioapic: OnceLock<IOAPICRegister> = OnceLock::new();
+    let mut num_core = 0usize;
     let mut redirection_table = [const { IOAPICRedirectionTable::new(0x00) }; 16];
     for (idx, entry) in redirection_table.iter_mut().enumerate() {
         entry.src = idx as u8;
@@ -34,6 +35,7 @@ pub fn init() {
         match entry.type_ {
             0 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<LocalAPICEntry>() };
+                num_core += 1;
                 debug!(
                     "MADT Entry {}: Local APIC, id={} flags={:#X}",
                     idx,
@@ -63,17 +65,6 @@ pub fn init() {
                 );
                 redirection_table[int as usize].src = entry.source;
                 redirection_table[int as usize].flags = flags as u8;
-                // let ioapic = ioapic.get_or_init(|| IOAPICRegister::default());
-                // let high = 0xFF00_0000u32;
-                // let mut low = (entry.source + InterruptVector::IRQDummy as u8) as u32;
-                // if flags & 0b10 != 0 {
-                //     low |= 0x2000;
-                // }
-                // if flags & 0b1000 != 0 {
-                //     low |= 0x8000;
-                // }
-                // ioapic.write(16 + int * 2, low);
-                // ioapic.write(16 + int * 2 + 1, high);
             }
             3 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<IntNMIOverrideEntry>() };
@@ -111,7 +102,7 @@ pub fn init() {
         if entry.src == 0 {
             continue;
         }
-        let high = 0xFF00_0000u32;
+        let high = 0x0000_0000u32;
         let mut low = (entry.src + InterruptVector::IRQStart as u8) as u32;
         if entry.flags & 0b0010 != 0 {
             low |= 0x2000;
@@ -122,4 +113,5 @@ pub fn init() {
         io_apic.write(16 + int as u8 * 2, low);
         io_apic.write(16 + int as u8 * 2 + 1, high);
     }
+    num_core
 }

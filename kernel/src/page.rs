@@ -1,5 +1,7 @@
 use core::arch::asm;
 
+use log::debug;
+
 const PAGE_SIZE_4K: usize = 4096;
 const PAGE_SIZE_2M: usize = PAGE_SIZE_4K * 512;
 const PAGE_SIZE_1G: usize = PAGE_SIZE_2M * 512;
@@ -30,6 +32,7 @@ unsafe fn init_page_identity_unsafe() {
                 (pdp_idx * PAGE_SIZE_1G + pd_idx * PAGE_SIZE_2M | 0x83) as u64;
         }
     }
+    debug!("PML4_PTR={:?}", (&PML4_TABLE) as *const PageTable);
     asm!(
         "mov cr3, {}",
         in(reg) PML4_TABLE.0.as_ptr() as u64
@@ -38,4 +41,8 @@ unsafe fn init_page_identity_unsafe() {
 
 pub fn init_page() {
     unsafe { init_page_identity_unsafe() };
+}
+
+pub fn page_table_ptr() -> u32 {
+    unsafe { PML4_TABLE.0.as_ptr() as u32 }
 }

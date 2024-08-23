@@ -50,12 +50,11 @@ pub trait Allocator {
 #[global_allocator]
 static ALLOCATOR: OnceLock<Mutex<slab::SlabAllocator>> = OnceLock::new();
 
-static FRAME_MANAGER: OnceLock<Mutex<frame::FrameBitmapManager>> = OnceLock::new();
+pub(crate) static FRAME_MANAGER: OnceLock<Mutex<frame::FrameBitmapManager>> = OnceLock::new();
 
 pub fn init_heap(memory_map: &MemoryMap) {
     FRAME_MANAGER.get_or_init(|| Mutex::new(frame::FrameBitmapManager::new()));
     FRAME_MANAGER.lock().scan(memory_map);
-    FRAME_MANAGER.lock().mark_alloc(FrameID(1), 0x800);
     let start = FRAME_MANAGER.lock().allocate(HEAP_FRAME_COUNT).unwrap();
     let end = FrameID(start.id() + HEAP_FRAME_COUNT as u64);
     let start_addr = (start.id() * BYTE_PER_FRAME) as usize;
@@ -68,6 +67,10 @@ pub fn init_heap(memory_map: &MemoryMap) {
 
 pub fn malloc(size: usize, align: usize) -> *mut u8 {
     unsafe { ALLOCATOR.alloc(Layout::from_size_align(size, align).unwrap()) }
+}
+
+pub fn free(ptr: *mut u8, size: usize, align: usize) {
+    unsafe { ALLOCATOR.dealloc(ptr, Layout::from_size_align(size, align).unwrap()) }
 }
 
 fn align(base: u64, align: u64) -> u64 {

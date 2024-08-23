@@ -148,4 +148,7 @@ pub struct BootInfo {
     pub frame_config: FrameBufferConfig,
     pub memory_map: MemoryMap,
     pub rsdp: &'static RSDP,
+    pub ap_bootstrap: Option<u32>,
+    pub stack_frame: (u64, usize),
+    pub ist_frame: (u64, usize),
 }

@@ -15,7 +15,6 @@ use crate::{
     println,
     queue::Node,
     sync::{Mutex, OnceLock},
-    KernelStack,
 };
 
 #[derive(Clone, Copy)]
@@ -369,7 +368,6 @@ impl FPUContext {
 const STACK_SIZE: usize = 0x2000;
 
 static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
-static TASK_STACK: OnceLock<u64> = OnceLock::new();
 pub static SCHEDULER: OnceLock<Mutex<PriorityRoundRobinScheduler>> = OnceLock::new();
 
 pub fn schedule() {
@@ -394,6 +392,8 @@ pub fn schedule() {
 }
 
 pub fn schedule_int(context: &mut Context) {
+    // debug!("switching");
+    // debug!("[SCHD] {:#X?}", context);
     let _ = without_interrupts(|| {
         let mut scheduler = SCHEDULER.get()?.lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
@@ -404,7 +404,8 @@ pub fn schedule_int(context: &mut Context) {
         } else {
             scheduler.push_task(running_task);
         }
-        // debug!("[SCHD] {} -> {}", running_task.id, next_task.id);
+        // debug!("[SCHD] Next    {}, {:#X?}", next_task.id, next_task.context);
+        // loop {}
         scheduler.set_running_task(next_task);
 
         running_task.fpu_context.save();
@@ -429,7 +430,6 @@ pub fn init_task() {
         .get_or_init(|| Mutex::new(TaskManager::new()))
         .lock();
     let scheduler = SCHEDULER.get_or_init(|| Mutex::new(PriorityRoundRobinScheduler::new()));
-    TASK_STACK.get_or_init(|| malloc(STACK_SIZE * 1024, 16) as u64);
     let task = manager.allocate().unwrap();
     scheduler.lock().set_running_task(task);
     task.flags = *TaskFlags::new().set_priority(0);
@@ -452,7 +452,8 @@ pub fn create_task(
     let task = manager.allocate()?;
 
     let parent_task = SCHEDULER.lock().running_task();
-    let stack_addr = TASK_STACK.get().ok_or(())? + STACK_SIZE as u64 * task.id;
+    let stack_addr = malloc(STACK_SIZE, STACK_SIZE) as u64;
+    // let stack_addr = TASK_STACK.get().ok_or(())? + STACK_SIZE as u64 * task.id;
 
     let (memory_addr, memory_size) = if flag.is_thread() {
         unsafe {

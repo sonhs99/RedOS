@@ -7,7 +7,8 @@ use handler::*;
 use idt::{EntryOptions, EntryTable};
 
 use crate::{
-    handler_with_context, handler_with_err_code, handler_without_err_code, sync::OnceLock,
+    handler_with_context, handler_with_err_code, handler_without_err_code,
+    sync::{Mutex, OnceLock},
 };
 use core::arch::asm;
 
@@ -23,6 +24,8 @@ pub enum InterruptVector {
 }
 
 static IDT: OnceLock<EntryTable> = OnceLock::new();
+
+static INT_FLAG: OnceLock<Mutex<bool>> = OnceLock::new();
 
 pub fn init_idt() {
     IDT.get_or_init(|| {
@@ -83,5 +86,10 @@ pub fn init_idt() {
         idt
     });
 
+    IDT.load();
+    INT_FLAG.get_or_init(|| Mutex::new(false));
+}
+
+pub fn load_idt() {
     IDT.load();
 }

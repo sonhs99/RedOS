@@ -118,7 +118,7 @@ impl Pci {
         }
         for func in 1..8 {
             if Self::read_vendor_id(bus, device, func) == 0xffff {
-                debug!("{bus}.{device}.{func}");
+                // debug!("{bus}.{device}.{func}");
                 continue;
             }
             self.scan_function(bus, device, func)?

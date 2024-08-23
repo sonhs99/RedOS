@@ -22,6 +22,18 @@ impl LocalAPICRegisters {
     pub fn apic_timer(&self) -> APICTimer {
         APICTimer(self.0)
     }
+
+    pub fn int_control(&self) -> LocalAPICIntCommand {
+        LocalAPICIntCommand::new(self.0)
+    }
+
+    pub fn error(&self) -> LocalAPICError {
+        LocalAPICError::new(self.0)
+    }
+
+    pub fn svr(&self) -> LocalAPICSVR {
+        LocalAPICSVR::new(self.0)
+    }
 }
 
 impl Default for LocalAPICRegisters {
@@ -128,5 +140,67 @@ impl IOAPICRegister {
 impl Default for IOAPICRegister {
     fn default() -> Self {
         Self(0xFEC0_0000)
+    }
+}
+
+pub struct LocalAPICIntCommand {
+    low: u32,
+    high: u32,
+}
+
+impl LocalAPICIntCommand {
+    pub fn new(address: u32) -> Self {
+        Self {
+            low: address + 0x300,
+            high: address + 0x310,
+        }
+    }
+
+    pub fn write(&self, low_val: u32, high_val: u32) {
+        unsafe {
+            write_volatile(self.high as *mut u32, high_val);
+            write_volatile(self.low as *mut u32, low_val);
+        }
+    }
+
+    pub fn read(&self) -> u32 {
+        unsafe { read_volatile(self.low as *const u32) }
+    }
+}
+
+impl Default for LocalAPICIntCommand {
+    fn default() -> Self {
+        Self {
+            low: 0xFEE0_0300,
+            high: 0xFEE0_0310,
+        }
+    }
+}
+
+pub struct LocalAPICError(u32);
+
+impl LocalAPICError {
+    pub fn new(address: u32) -> Self {
+        Self(0xFEE0_0280)
+    }
+
+    pub fn read(&self) -> u32 {
+        unsafe { read_volatile(self.0 as *const u32) }
+    }
+}
+
+pub struct LocalAPICSVR(u32);
+
+impl LocalAPICSVR {
+    pub fn new(address: u32) -> Self {
+        Self(address + 0x0F0)
+    }
+
+    pub fn write(&self, value: u32) {
+        unsafe { write_volatile(self.0 as *mut u32, value) };
+    }
+
+    pub fn read(&self) -> u32 {
+        unsafe { read_volatile(self.0 as *const u32) }
     }
 }

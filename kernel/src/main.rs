@@ -4,19 +4,21 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, format, string::String, vec};
-use core::{arch::asm, iter::empty, str};
+use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
     acpi,
     allocator::init_heap,
+    ap::init_ap,
     console::{init_console, Console},
     device::{
-        driver::keyboard::{get_code, getch, Keyboard},
-        hdd::{
+        block::{
             pata::{get_device, init_pata},
+            ram::RamDisk,
             Block,
         },
+        driver::keyboard::{get_code, getch, Keyboard},
         pci::{
             init_pci,
             msi::{Message, Msi},
@@ -28,7 +30,7 @@ use kernel::{
     entry_point,
     float::set_ts,
     font::write_ascii,
-    fs::{self, dev_list, format_by_name, init_fs, mount, open, open_dir},
+    fs::{self, dev_list, flush, format_by_name, init_fs, mount, open, open_dir},
     gdt::init_gdt,
     graphic::{get_graphic, init_graphic, GraphicWriter, PixelColor, PIXEL_WRITER},
     interrupt::{
@@ -56,7 +58,7 @@ fn kernel_main(boot_info: BootInfo) {
 
     info!("Rust Kernel Started");
 
-    init_gdt();
+    init_gdt(boot_info.ist_frame.0, boot_info.ist_frame.1 as u64);
     info!("GDT Initialized");
 
     init_idt();
@@ -74,6 +76,11 @@ fn kernel_main(boot_info: BootInfo) {
     init_fs();
     info!("Root File System Initialized");
 
+    let ramdisk = RamDisk::new(8 * 1024 * 1024);
+    mount(ramdisk, "ram0", false);
+    format_by_name("ram0", 8 * 1024 * 1024, false);
+    info!("RAM Disk Mounted");
+
     // Do Not Use
     // set_ts();
     // info!("Lazy FP Enable");
@@ -81,8 +88,9 @@ fn kernel_main(boot_info: BootInfo) {
     acpi::initialize(boot_info.rsdp);
     info!("ACPI Initialized");
 
-    ioapic::init();
+    let num_core = ioapic::init();
     info!("I/O APIC Initialized");
+    info!("Number Of Core: {num_core}");
 
     init_pm();
     info!("ACPI PM Timer Initialized");
@@ -93,13 +101,23 @@ fn kernel_main(boot_info: BootInfo) {
         APICTimerMode::Periodic,
         InterruptVector::APICTimer as u8,
     );
-    set_interrupt(true);
     info!("Enable APIC Timer Interrupt");
+    set_interrupt(true);
+
+    // if boot_info.ap_bootstrap.is_some() {
+    //     let wake_up_count = init_ap(
+    //         num_core,
+    //         boot_info.stack_frame.0,
+    //         boot_info.stack_frame.1 as u64,
+    //     )
+    //     .expect("AP Wakeup Failed");
+    //     info!("{wake_up_count} AP Wakeup");
+    // }
 
     info!("PCI Init Started");
     init_pci();
 
-    // create_task(TaskFlags::new(), test as u64, 0, 0);
+    create_task(TaskFlags::new(), test as u64, 0, 0);
 
     match PciSearcher::new()
         .base(Base::Serial)
@@ -125,7 +143,7 @@ fn kernel_main(boot_info: BootInfo) {
 
             without_interrupts(|| {
                 let msg = Message::new()
-                    .destionation_id(0xFF)
+                    .destionation_id(0x00)
                     .interrupt_index(InterruptVector::XHCI as u8)
                     .level(true)
                     .trigger_mode(true)
@@ -169,18 +187,17 @@ fn kernel_main(boot_info: BootInfo) {
                 ide_dev.bus, ide_dev.dev, ide_dev.func
             );
             init_pata();
-            for i in 0..4 {
-                if i == 0 {
-                    continue;
-                }
+            for i in 1..4 {
                 if let Ok(hdd) = get_device(i) {
                     info!("PATA:{i} Detected");
-                    // create_task(TaskFlags::new(), test_hdd as u64, 0, 0);
+                    // // create_task(TaskFlags::new(), test_hdd as u64, 0, 0);
                     let dev_name = format!("pata{i}");
-                    if let Ok(fs_count) = mount(hdd, &dev_name) {
+                    if let Ok(fs_count) = mount(hdd, &dev_name, true) {
                         info!("PATA:{i} mounted, fs_count={fs_count}");
                         if fs_count == 0 {
-                            if let Err(reason) = format_by_name(&dev_name, 1024 * 1024 * 10 / 512) {
+                            if let Err(reason) =
+                                format_by_name(&dev_name, 1024 * 1024 * 10 / 512, true)
+                            {
                                 info!("PATA:{i} format failed");
                                 info!("{}", reason);
                             } else {
@@ -188,23 +205,15 @@ fn kernel_main(boot_info: BootInfo) {
                             }
                         }
                     }
-                    let mut count = 0;
-                    let file = open(&dev_name, 0, "/file", b"w").expect("File Open Failed");
-                    let root = open_dir(&dev_name, 0, "/", b"r")
-                        .expect("Attempt to Open Root Directory Failed");
-                    for (idx, entry) in root.entries() {
-                        info!("[{idx}] /{entry}");
-                        count += 1;
-                    }
-                    info!("Total {count} entries");
                 } else {
                     info!("PATA:{i} Not Detected");
                 }
             }
-
+            info!("List of Block I/O Device");
             for (idx, dev_name) in dev_list().iter().enumerate() {
                 info!("[{idx}] {dev_name}");
             }
+            create_task(TaskFlags::new(), test_fs as u64, 0, 0);
         }
         None => {}
     }
@@ -327,6 +336,43 @@ fn test_hdd_rw() {
         }
     }
     info!("Test Success");
+}
+
+fn test_fs() {
+    let dev_name = "ram0";
+
+    let root = open_dir(dev_name, 0, "/", b"r").expect("Attempt to Open Root Directory Failed");
+    let mut count = 0;
+    for (idx, entry) in root.entries() {
+        info!("[{idx}] /{entry}");
+        count += 1;
+    }
+    info!("Total {count} entries");
+
+    let mut buffer = [0u8; 11];
+    if let Ok(mut file) = open(dev_name, 0, "/file", b"r") {
+        info!("File Found");
+        file.read(&mut buffer).expect("File Read Failed");
+        info!("File data={buffer:?}");
+        file.remove().expect("File Remove Failed");
+        flush();
+    } else {
+        info!("File Not Found");
+        let mut file = open(dev_name, 0, "/file", b"w").expect("File Create Failed");
+        buffer = [4u8; 11];
+        info!("File data={buffer:?}");
+        file.write(&buffer).expect("File Write Failed");
+        info!("File Write Complete");
+        flush();
+    }
+
+    let root = open_dir(dev_name, 0, "/", b"r").expect("Attempt to Open Root Directory Failed");
+    let mut count = 0;
+    for (idx, entry) in root.entries() {
+        info!("[{idx}] /{entry}");
+        count += 1;
+    }
+    info!("Total {count} entries");
 }
 
 fn test() {

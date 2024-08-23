@@ -1,9 +1,9 @@
-use core::mem::size_of;
+use core::{alloc::Layout, mem::size_of};
 
 use bootloader::{MemoryDescriptor, MemoryMap, MemoryType};
 use log::debug;
 
-use super::{FrameID, BYTE_PER_FRAME, FRAME_COUNT};
+use super::{Allocator, FrameID, BYTE_PER_FRAME, FRAME_COUNT, FRAME_MANAGER};
 use crate::page::UEFI_PAGE_SIZE;
 
 type BitmapType = u8;
@@ -89,7 +89,7 @@ impl FrameBitmapManager {
     }
 
     pub fn mark_alloc(&mut self, begin: FrameID, size: usize) {
-        for frame in begin.id()..size as u64 {
+        for frame in begin.id()..begin.id() + size as u64 {
             self.set_bitmap(FrameID(frame), true).unwrap();
         }
     }
@@ -136,6 +136,29 @@ impl FrameBitmapManager {
         let bitmap_idx = frame.id() as usize / Bitmap::bits();
         let bit_idx = frame.id() as usize % Bitmap::bits();
         self.bitmap[bitmap_idx].get(bit_idx as u8)
+    }
+}
+
+pub struct FrameAllocator {}
+
+impl FrameAllocator {
+    pub const fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Allocator for FrameAllocator {
+    fn allocate(&mut self, layout: Layout) -> Result<*mut u8, ()> {
+        let frame_size = (layout.size() + BYTE_PER_FRAME as usize - 1) / BYTE_PER_FRAME as usize;
+        let ptr = FRAME_MANAGER.lock().allocate(frame_size)?;
+        Ok((ptr.0 * BYTE_PER_FRAME) as *mut u8)
+    }
+
+    fn free(&mut self, ptr: *mut u8, layout: Layout) {
+        let ptr = ptr as u64;
+        let frame = FrameID::new(ptr / BYTE_PER_FRAME);
+        let frame_size = (layout.size() + BYTE_PER_FRAME as usize - 1) / BYTE_PER_FRAME as usize;
+        FRAME_MANAGER.lock().free(frame, frame_size);
     }
 }
 

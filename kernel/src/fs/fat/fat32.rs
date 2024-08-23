@@ -1,13 +1,15 @@
+use core::slice;
 use core::str;
-use core::{ptr::slice_from_raw_parts, slice};
 
+use alloc::borrow::ToOwned;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::{boxed::Box, vec::Vec};
 use ascii::{AsciiStr, AsciiString};
 use log::debug;
 
-use crate::device::hdd::{Block, BlockIO};
+use crate::cache::Cache;
+use crate::device::block::{Block, BlockIO};
 
 use super::{
     CommonFATHeader, DirectoryDescriptor, DirectoryEntry, FileDescriptor, FileSystem,
@@ -17,6 +19,7 @@ use super::{
 
 const FAT32_RESERVED_SECTOR_COUNT: u32 = 32;
 const FAT32_ROOT_DIRECTORY_CLUSTER: u32 = 2;
+const FAT32_CACHE_SIZE: usize = 128;
 
 #[repr(C, packed)]
 struct FAT32Header {
@@ -108,10 +111,19 @@ pub struct FAT32 {
     free_cluster_count: u32,
     next_free_cluster: u32,
     root_directory_cluster: u32,
+
+    use_cache: bool,
+    fat_cache: Cache<Block<512>>,
+    cluster_cache: Cache<Block<512>>,
 }
 
 impl FAT32 {
-    pub fn mount(device: &mut dyn BlockIO, start_addr: u32, volume_size: u32) -> Result<Self, ()> {
+    pub fn mount(
+        device: &mut dyn BlockIO,
+        start_addr: u32,
+        volume_size: u32,
+        use_cache: bool,
+    ) -> Result<Self, ()> {
         let mut buffer = vec![Block::empty()];
         device.read(start_addr, &mut buffer).map_err(|err| ())?;
         let header = buffer[0].convert::<FAT32Header>();
@@ -124,6 +136,10 @@ impl FAT32 {
         let root_directory_cluster = header.root_directory_clustor;
 
         debug!("Jmp Boot Code  : {:0X?}", header.common.jmp_boot_code);
+        debug!(
+            "Name String    : {}",
+            AsciiStr::from_ascii(&header.common.oem_id).unwrap()
+        );
         debug!("Byte/Sector    : {byte_per_sector}");
         debug!("Sector/Cluster : {sector_per_cluster}");
         debug!("Reserved Sector: {reserved_sector_count:#X}");
@@ -149,10 +165,18 @@ impl FAT32 {
             free_cluster_count,
             next_free_cluster,
             root_directory_cluster,
+            use_cache,
+            fat_cache: Cache::new(1, FAT32_CACHE_SIZE),
+            cluster_cache: Cache::new(sector_per_cluster as usize, FAT32_CACHE_SIZE),
         })
     }
 
-    pub fn format(device: &mut dyn BlockIO, start_addr: u32, volume_size: u32) -> Result<Self, ()> {
+    pub fn format(
+        device: &mut dyn BlockIO,
+        start_addr: u32,
+        volume_size: u32,
+        use_cache: bool,
+    ) -> Result<Self, ()> {
         let cluster_count = (volume_size - 32) / 8;
         let fat_size =
             (cluster_count + FAT_SECTOR_PER_CLUSTER_ENTRY - 1) / FAT_SECTOR_PER_CLUSTER_ENTRY;
@@ -221,6 +245,9 @@ impl FAT32 {
             free_cluster_count: data_cluster_count - 1,
             next_free_cluster: 3,
             root_directory_cluster: 2,
+            use_cache,
+            fat_cache: Cache::new(1, FAT32_CACHE_SIZE),
+            cluster_cache: Cache::new(FAT_SECTOR_PER_CLUSTER as usize, FAT32_CACHE_SIZE),
         })
     }
 
@@ -228,24 +255,53 @@ impl FAT32 {
         &mut self,
         device: &mut dyn BlockIO,
         offset: u32,
-        buffer: &mut Block<512>,
+        buffer: &mut Vec<Block<512>>,
     ) -> Result<usize, usize> {
-        device.read(self.fat_addr + offset, slice::from_mut(buffer))
+        let addr = self.fat_addr + offset;
+        if self.use_cache {
+            if let Ok(fat_data) = self.fat_cache.read_from_cache(addr as u64) {
+                // buffer.clone_from(fat_data);
+                return Ok(1);
+            } else {
+                let res = device.read(addr, buffer);
+                self.fat_cache
+                    .allocate_cache(addr as u64, &buffer, |address, buffer| {
+                        device.write(address as u32, buffer);
+                    });
+                return res;
+            }
+        } else {
+            device.read(addr as u32, buffer)
+        }
     }
 
     fn set_fat_sector(
         &mut self,
         device: &mut dyn BlockIO,
         offset: u32,
-        buffer: &Block<512>,
+        buffer: &Vec<Block<512>>,
     ) -> Result<usize, usize> {
-        device.write(self.fat_addr + offset, slice::from_ref(buffer))
+        let addr = self.fat_addr + offset;
+        if self.use_cache {
+            if self.fat_cache.write_to_cache(addr as u64, &buffer).is_ok() {
+                return Ok(1);
+            } else {
+                let res = device.write(addr, &buffer);
+                self.fat_cache
+                    .allocate_cache(addr as u64, &buffer, |address, buffer| {
+                        device.write(address as u32, buffer);
+                    });
+                res
+            }
+        } else {
+            device.write(addr, &buffer)
+        }
     }
 
     fn get_free_cluster(&mut self, device: &mut dyn BlockIO) -> Result<u32, ()> {
         let free_cluster = self.next_free_cluster;
         let cluster_entry_size = self.fat_size * FAT_SECTOR_PER_CLUSTER_ENTRY;
-        let mut buffer: Block<512> = Block::empty();
+        let mut buffer: Vec<Block<512>> = vec![Block::empty()];
         for cluster_offset in 1..=cluster_entry_size {
             let next_free_cluster = free_cluster.wrapping_add(cluster_offset);
             let cluster_sector = next_free_cluster / FAT_SECTOR_PER_CLUSTER_ENTRY;
@@ -254,7 +310,7 @@ impl FAT32 {
                 self.get_fat_sector(device, cluster_sector, &mut buffer)
                     .map_err(|err| ())?;
             }
-            if *buffer.get::<u32>(cluster_offset as usize) == 0 {
+            if *buffer[0].get::<u32>(cluster_offset as usize) == 0 {
                 self.next_free_cluster = next_free_cluster;
                 return Ok(free_cluster);
             }
@@ -301,20 +357,51 @@ impl FAT32 {
         &mut self,
         device: &mut dyn BlockIO,
         cluster: u32,
-        buffer: &mut [Block<512>],
+        buffer: &mut Vec<Block<512>>,
     ) -> Result<usize, usize> {
-        let offset = self.sector_per_cluster as u32 * cluster;
-        device.read(self.data_addr + offset, buffer)
+        let addr = self.data_addr + self.sector_per_cluster as u32 * cluster;
+        if self.use_cache {
+            if let Ok(cluster_data) = self.cluster_cache.read_from_cache(addr as u64) {
+                buffer.clone_from(&cluster_data);
+                return Ok(self.sector_per_cluster as usize);
+            } else {
+                let res = device.read(addr, buffer);
+                self.cluster_cache
+                    .allocate_cache(addr as u64, buffer, |address, buffer| {
+                        device.write(address as u32, buffer);
+                    });
+                return res;
+            }
+        } else {
+            device.read(addr, buffer)
+        }
     }
 
     fn write_cluster(
         &mut self,
         device: &mut dyn BlockIO,
         cluster: u32,
-        buffer: &[Block<512>],
+        buffer: &Vec<Block<512>>,
     ) -> Result<usize, usize> {
-        let offset = self.sector_per_cluster as u32 * cluster;
-        device.write(self.data_addr + offset, buffer)
+        let addr = self.data_addr + self.sector_per_cluster as u32 * cluster;
+        if self.use_cache {
+            if self
+                .cluster_cache
+                .write_to_cache(addr as u64, buffer)
+                .is_ok()
+            {
+                Ok(self.sector_per_cluster as usize)
+            } else {
+                let res = device.write(addr, buffer);
+                self.cluster_cache
+                    .allocate_cache(addr as u64, buffer, |address, buffer| {
+                        device.write(address as u32, buffer);
+                    });
+                return res;
+            }
+        } else {
+            device.write(addr, buffer)
+        }
     }
 
     fn get_empty_dir_idx(&mut self, device: &mut dyn BlockIO, dir_cluster: u32) -> Result<u32, ()> {
@@ -328,17 +415,19 @@ impl FAT32 {
             let sector_offset = idx % entry_per_sector;
             let entry = buffer[sector as usize].get::<DirectoryEntry>(sector_offset as usize);
             if entry.start_cluster_idx() == 0 {
+                debug!("entry_idx={idx}");
                 return Ok(idx);
             }
         }
         Err(())
     }
 
-    fn get_dir_table(
+    fn get_dir_entry(
         &mut self,
         device: &mut dyn BlockIO,
         dir_cluster: u32,
-    ) -> Result<[DirectoryEntry; FAT_MAX_DIRECTORY_ENTRY_COUNT as usize], ()> {
+        dir_offset: u32,
+    ) -> Result<DirectoryEntry, ()> {
         let entry_per_sector = FAT_MAX_DIRECTORY_ENTRY_COUNT / self.sector_per_cluster as u32;
         let mut buffer: Vec<Block<512>> = vec![Block::empty(); 8];
         let offset = self.sector_per_cluster as u32 * dir_cluster;
@@ -346,27 +435,26 @@ impl FAT32 {
         let sector_offset = dir_cluster % entry_per_sector;
         self.read_cluster(device, self.data_addr + offset, &mut buffer)
             .map_err(|err| ())?;
-        unsafe {
-            Ok(*buffer
-                .as_ptr()
-                .cast::<[DirectoryEntry; FAT_MAX_DIRECTORY_ENTRY_COUNT as usize]>())
-        }
+        Ok(buffer[(dir_offset / entry_per_sector) as usize]
+            .get::<DirectoryEntry>((dir_offset % entry_per_sector) as usize)
+            .clone())
     }
 
-    fn set_dir_data(
+    fn set_dir_entry(
         &mut self,
         device: &mut dyn BlockIO,
         dir_cluster: u32,
-        dir_idx: u32,
+        dir_offset: u32,
         data: &DirectoryEntry,
     ) -> Result<(), ()> {
         let entry_per_sector = FAT_MAX_DIRECTORY_ENTRY_COUNT / self.sector_per_cluster as u32;
         let mut buffer: Vec<Block<512>> = vec![Block::empty(); 8];
         let offset = self.sector_per_cluster as u32 * dir_cluster;
-        let sector = dir_idx / entry_per_sector;
-        let sector_offset = dir_idx % entry_per_sector;
+        let sector = dir_offset / entry_per_sector;
+        let sector_offset = dir_offset % entry_per_sector;
         self.read_cluster(device, self.data_addr + offset, &mut buffer)
             .map_err(|err| ())?;
+        debug!("[FAT] dir_idx={dir_offset:X}, sector={sector:X}");
         *buffer[sector as usize].get_mut(sector_offset as usize) = *data;
         self.write_cluster(device, self.data_addr + offset, &buffer)
             .map_err(|err| ())?;
@@ -386,8 +474,7 @@ impl FileSystem for FAT32 {
         file_name: &str,
     ) -> Result<FileDescriptor, ()> {
         let dir_entry_idx = self.get_empty_dir_idx(device, dir.file_start_idx)?;
-        let mut dir_entry =
-            (self.get_dir_table(device, dir.file_start_idx)?)[dir_entry_idx as usize];
+        let mut dir_entry = self.get_dir_entry(device, dir.file_start_idx, dir_entry_idx)?;
         let data_cluster = self.get_free_cluster(device)?;
         let file_name_byte = file_name.as_bytes();
         self.set_cluster_ptr(device, data_cluster, FAT_END_OF_CLUSTER)?;
@@ -397,21 +484,11 @@ impl FileSystem for FAT32 {
             }
         }
         debug!("Start Data Cluster={data_cluster:#X}");
-        // dir_entry
-        //     .name
-        //     .iter_mut()
-        //     .zip(file_name.as_bytes())
-        //     .map(|(c, nc)| *c = *nc);
         dir_entry.attr = FAT_DIR_ATTRIBUTE_FILE;
         dir_entry.set_start_cluster_idx(data_cluster);
+        debug!("[FAT] entry_idx={dir_entry_idx:#X}");
+        self.set_dir_entry(device, dir.file_start_idx, dir_entry_idx, &dir_entry)?;
 
-        self.set_dir_data(device, dir.file_start_idx, dir_entry_idx, &dir_entry)?;
-        let test_entry = (self.get_dir_table(device, dir.file_start_idx)?)[dir_entry_idx as usize];
-        debug!(
-            "entry={:#X}, target={:#X}",
-            test_entry.start_cluster_idx(),
-            data_cluster
-        );
         Ok(FileDescriptor {
             file_start_idx: data_cluster,
             file_current_idx: data_cluster,
@@ -428,11 +505,8 @@ impl FileSystem for FAT32 {
         dir: &DirectoryDescriptor,
         file_name: &str,
     ) -> Result<FileDescriptor, ()> {
-        for (idx, entry) in self
-            .get_dir_table(device, dir.file_start_idx)?
-            .iter()
-            .enumerate()
-        {
+        for offset in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
+            let entry = self.get_dir_entry(device, dir.file_start_idx, offset)?;
             if entry
                 .name
                 .iter()
@@ -448,7 +522,7 @@ impl FileSystem for FAT32 {
                     file_start_idx,
                     file_current_idx: file_start_idx,
                     dir_idx: dir.file_start_idx,
-                    dir_offset: idx as u32,
+                    dir_offset: offset as u32,
                     file_size: entry.file_size,
                     ptr: 0,
                 });
@@ -460,11 +534,11 @@ impl FileSystem for FAT32 {
     fn remove(&mut self, device: &mut dyn BlockIO, file: FileDescriptor) -> Result<(), ()> {
         let entry = DirectoryEntry::empty();
         let mut data_cluster = file.file_start_idx;
-        self.set_dir_data(device, file.dir_idx, file.dir_offset, &entry)?;
+        self.set_dir_entry(device, file.dir_idx, file.dir_offset, &entry)?;
 
         while data_cluster != FAT_END_OF_CLUSTER {
             let next_data_cluster = self.get_cluster_ptr(device, data_cluster)?;
-            debug!("{data_cluster:#X} -> {next_data_cluster:#X}");
+            debug!("remove: {data_cluster:#X} -> {next_data_cluster:#X}");
             self.set_cluster_ptr(device, data_cluster, 0)?;
             data_cluster = next_data_cluster;
         }
@@ -510,10 +584,13 @@ impl FileSystem for FAT32 {
         buffer: &[u8],
     ) -> Result<usize, usize> {
         let byte_per_cluster = self.cluster_size();
-        let mut dev_buffer: Vec<Block<512>> = vec![Block::empty(); 8];
+        let mut dev_buffer: Vec<Block<512>> =
+            vec![Block::empty(); self.sector_per_cluster as usize];
         let mut count = 0usize;
         self.read_cluster(device, file.file_current_idx, &mut dev_buffer)
             .map_err(|err| count)?;
+
+        // debug!("[FAT] write data={buffer:?}");
 
         for &data in buffer.iter() {
             let file_cluster_offset = file.ptr % byte_per_cluster;
@@ -543,11 +620,13 @@ impl FileSystem for FAT32 {
             }
             count += 1;
         }
+        self.write_cluster(device, file.file_current_idx, &dev_buffer)
+            .map_err(|err| count)?;
         let mut dir = self
-            .get_dir_table(device, file.dir_idx)
-            .map_err(|err| count)?[file.dir_offset as usize];
+            .get_dir_entry(device, file.dir_idx, file.dir_offset)
+            .map_err(|err| count)?;
         dir.file_size += count as u32;
-        self.set_dir_data(device, file.dir_idx, file.dir_offset, &dir)
+        self.set_dir_entry(device, file.dir_idx, file.dir_offset, &dir)
             .map_err(|err| count)?;
         Ok(count)
     }
@@ -559,8 +638,7 @@ impl FileSystem for FAT32 {
         dir_name: &str,
     ) -> Result<DirectoryDescriptor, ()> {
         let empty_dir_offset = self.get_empty_dir_idx(device, dir.file_start_idx)?;
-        let mut dir_entry =
-            self.get_dir_table(device, dir.file_start_idx)?[empty_dir_offset as usize];
+        let mut dir_entry = self.get_dir_entry(device, dir.file_start_idx, empty_dir_offset)?;
         let free_cluster = self.get_free_cluster(device)?;
 
         dir_entry
@@ -570,7 +648,7 @@ impl FileSystem for FAT32 {
             .map(|(n, nc)| *n = *nc);
         dir_entry.attr = FAT_DIR_ATTRIBUTE_DIR;
         dir_entry.set_start_cluster_idx(free_cluster);
-        self.set_dir_data(device, dir.file_start_idx, empty_dir_offset, &dir_entry)?;
+        self.set_dir_entry(device, dir.file_start_idx, empty_dir_offset, &dir_entry)?;
 
         self.set_cluster_ptr(device, free_cluster, FAT_END_OF_CLUSTER)?;
 
@@ -587,11 +665,8 @@ impl FileSystem for FAT32 {
         dir: &DirectoryDescriptor,
         dir_name: &str,
     ) -> Result<DirectoryDescriptor, ()> {
-        for (idx, entry) in self
-            .get_dir_table(device, dir.file_start_idx)?
-            .iter()
-            .enumerate()
-        {
+        for offset in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
+            let entry = self.get_dir_entry(device, dir.file_start_idx, offset)?;
             if entry
                 .name
                 .iter()
@@ -604,7 +679,7 @@ impl FileSystem for FAT32 {
                 return Ok(DirectoryDescriptor {
                     file_start_idx: entry.start_cluster_idx(),
                     dir_idx: dir.file_start_idx,
-                    dir_offset: idx as u32,
+                    dir_offset: offset,
                 });
             }
         }
@@ -616,8 +691,8 @@ impl FileSystem for FAT32 {
             return Err(());
         }
 
-        let entry_table = self.get_dir_table(device, dir.file_start_idx)?;
-        for (offset, entry) in entry_table.iter().enumerate() {
+        for offset in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
+            let entry = self.get_dir_entry(device, dir.file_start_idx, offset)?;
             let file_start_idx = entry.start_cluster_idx();
             if entry.attr == FAT_DIR_ATTRIBUTE_FILE {
                 self.remove(
@@ -643,7 +718,7 @@ impl FileSystem for FAT32 {
             }
         }
         let entry = DirectoryEntry::empty();
-        self.set_dir_data(device, dir.dir_idx, dir.dir_offset, &entry)?;
+        self.set_dir_entry(device, dir.dir_idx, dir.dir_offset, &entry)?;
         self.set_cluster_ptr(device, dir.file_start_idx, 0)?;
 
         Ok(())
@@ -663,12 +738,12 @@ impl FileSystem for FAT32 {
         dir: &DirectoryDescriptor,
     ) -> Result<Vec<(usize, String)>, ()> {
         let mut list: Vec<(usize, String)> = Vec::new();
-        let entry_table = self.get_dir_table(device, dir.file_start_idx)?;
-        for (offset, entry) in entry_table.iter().enumerate() {
+        for offset in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
+            let entry = self.get_dir_entry(device, dir.file_start_idx, offset)?;
             let file_start_idx = entry.start_cluster_idx();
             if file_start_idx != 0 {
                 list.push((
-                    offset,
+                    offset as usize,
                     AsciiStr::from_ascii(&entry.name).unwrap().to_string(),
                 ));
             }
@@ -677,9 +752,9 @@ impl FileSystem for FAT32 {
     }
 
     fn shrink(&mut self, device: &mut dyn BlockIO, file: &mut FileDescriptor) -> Result<(), ()> {
-        let mut dir = self.get_dir_table(device, file.dir_idx)?[file.dir_offset as usize];
+        let mut dir = self.get_dir_entry(device, file.dir_idx, file.dir_offset)?;
         dir.file_size = 0;
-        self.set_dir_data(device, file.dir_idx, file.dir_offset, &dir)?;
+        self.set_dir_entry(device, file.dir_idx, file.dir_offset, &dir)?;
         file.file_size = 0;
         file.file_current_idx = file.file_start_idx;
 
@@ -696,5 +771,16 @@ impl FileSystem for FAT32 {
         }
 
         Ok(())
+    }
+
+    fn flush(&mut self, device: &mut dyn BlockIO) {
+        if self.use_cache {
+            self.fat_cache.flush(|address, buffer| {
+                device.write(address as u32, buffer);
+            });
+            self.cluster_cache.flush(|address, buffer| {
+                device.write(address as u32, buffer);
+            })
+        }
     }
 }

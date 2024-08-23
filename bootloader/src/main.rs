@@ -68,15 +68,93 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
 
         let elf_file = Elf64::new(kernel_buffer as u64);
         let (kernel_first_addr, kernel_last_addr) = calculate_address(&elf_file);
+        let num_page = (kernel_last_addr - kernel_first_addr + 0x0FFF) / 0x1000;
+        bs.allocate_pages(
+            AllocateType::Address(kernel_first_addr),
+            MemoryType::LOADER_DATA,
+            num_page as usize,
+        )
+        .unwrap();
         copy_load_segment(&elf_file);
 
         info!("Kernel: 0x{kernel_first_addr:08X} - 0x{kernel_last_addr:08X}");
         let header = elf_file.get_header();
         info!("Entry Point: 0x{:08X}", header.e_entry);
         info!("Type: 0x{:04X}", header.e_type);
+        info!("Pages: {}", num_page);
+
         let kernel_entry_point = header.e_entry;
 
         unsafe { bs.free_pool(kernel_buffer).unwrap() };
+
+        // Stack
+
+        let stack_start_addr = (kernel_last_addr + 0xF_FFFF) & !0xF_FFFF;
+        let stack_size = 0x10_0000;
+        let stack_last_addr = stack_start_addr + stack_size;
+        bs.allocate_pages(
+            AllocateType::Address(stack_start_addr),
+            MemoryType::LOADER_DATA,
+            stack_size as usize / 0x1000,
+        )
+        .unwrap();
+        info!("Stack: 0x{stack_start_addr:08X} - 0x{stack_last_addr:08X}");
+        info!("Pages: {}", stack_size / 0x1000);
+
+        // IST
+
+        let ist_start_addr = (stack_last_addr + 0xF_FFFF) & !0xF_FFFF;
+        let ist_size = 0x10_0000;
+        let ist_last_addr = ist_start_addr + ist_size;
+        bs.allocate_pages(
+            AllocateType::Address(ist_start_addr),
+            MemoryType::LOADER_DATA,
+            stack_size as usize / 0x1000,
+        )
+        .unwrap();
+        info!("IST: 0x{stack_start_addr:08X} - 0x{stack_last_addr:08X}");
+        info!("Pages: {}", ist_size / 0x1000);
+
+        // Trampoline Load
+        let ap_bootstrap = match root_dir.open(
+            cstr16!("\\ap_bootstrap.bin"),
+            FileMode::Read,
+            FileAttribute::empty(),
+        ) {
+            Ok(mut ap_file) => {
+                let mut ap_file = ap_file.into_regular_file().unwrap();
+                let mut file_info_buffer = [0u8; 0x100];
+                let file_info = ap_file.get_info::<FileInfo>(&mut file_info_buffer).unwrap();
+
+                let ap_file_size = file_info.file_size() as usize;
+                let num_page = (ap_file_size + 0xFFF) / 0x1000;
+
+                // let ap_base_addr = 0x8000;
+                let ap_base_addr = bs
+                    .allocate_pages(
+                        AllocateType::Address(0x8000),
+                        MemoryType::LOADER_DATA,
+                        num_page,
+                    )
+                    .unwrap();
+
+                ap_file.read(unsafe {
+                    &mut *slice_from_raw_parts_mut(ap_base_addr as *mut u8, kernel_file_size)
+                });
+
+                info!(
+                    "Trampoline: 0x{:08X} - 0x{:08X}",
+                    ap_base_addr,
+                    ap_base_addr + ap_file_size as u64
+                );
+                info!("Pages: {}", num_page);
+                Some(ap_base_addr as u32)
+            }
+            Err(_) => {
+                info!("Not Found AP Kernel");
+                None
+            }
+        };
 
         // Memory Map Load
 
@@ -154,6 +232,9 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
                     descriptor_size: mmap_size.entry_size as u64,
                 },
                 rsdp,
+                ap_bootstrap,
+                stack_frame: (stack_start_addr, stack_size as usize),
+                ist_frame: (ist_start_addr, ist_size as usize),
             },
         )
     };

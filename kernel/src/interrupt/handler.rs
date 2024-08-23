@@ -3,7 +3,7 @@ use core::{arch::asm, hint::black_box};
 use log::debug;
 
 use crate::{
-    device::{hdd::pata::set_interrupt_flag, xhc::XHC},
+    device::{block::pata::set_interrupt_flag, xhc::XHC},
     float::{clear_ts, fpu_init, fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
     println,
@@ -12,6 +12,8 @@ use crate::{
         scheduler::Schedulable, Context, SCHEDULER,
     },
 };
+
+use super::INT_FLAG;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -199,6 +201,13 @@ macro_rules! handler_with_context{
                 mov rax, gs
                 push rax
 
+                mov ax, 0x10
+                mov ds, ax
+                mov es, ax
+                mov fs, ax
+                mov gs, ax
+                mov ss, ax
+
                 mov rdi, rsp
                 call {func}
 
@@ -244,16 +253,23 @@ pub extern "C" fn common_exception(stack_frame: &ExceptionStackFrame) {
 }
 
 pub extern "C" fn divided_by_zero(stack_frame: &ExceptionStackFrame) {
-    println!("[EXCEP]: DIVIDED_BY_ZEOR\n{stack_frame:#X?}");
+    println!("[EXCEP]: DIVIDED_BY_ZERO\n{stack_frame:#X?}");
     loop {}
 }
 
 pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
-    println!(
-        "[EXCEP]: INVALID_OPCODE at {:#X}\n{:#X?}",
-        stack_frame.instruction_pointer, stack_frame
-    );
-    loop {}
+    if let Some(running) = running_task() {
+        println!("[EXCEP]: PID={}", running.id());
+        println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
+        if running.id() > 2 {
+            exit();
+        } else {
+            loop {}
+        }
+    } else {
+        println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
+        loop {}
+    }
 }
 
 // pub extern "C" fn device_not_available(stack_frame: &ExceptionStackFrame, error_code: u64) {
@@ -280,7 +296,7 @@ pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64)
     if let Some(running) = running_task() {
         println!("[EXCEP]: PID={}", running.id());
         println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
-        if running.id() > 2 {
+        if running.id() > 1 {
             exit();
         } else {
             loop {}
@@ -297,11 +313,24 @@ pub extern "C" fn double_fault(stack_frame: &ExceptionStackFrame, error_code: u6
 }
 
 pub extern "C" fn general_protection(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
-    loop {}
+    if let Some(running) = running_task() {
+        println!("[EXCEP]: PID={}", running.id());
+        println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
+        if running.id() > 1 {
+            exit();
+        } else {
+            loop {}
+        }
+    } else {
+        println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
+        loop {}
+    }
 }
 
 pub extern "C" fn break_point(stack_frame: &ExceptionStackFrame) {
+    if let Some(running) = running_task() {
+        println!("[EXCEP]: PID={}", running.id());
+    }
     println!(
         "[EXCEP]: BREAKPOINT at {:#X}\n{:#X?}",
         stack_frame.instruction_pointer, stack_frame
@@ -318,6 +347,7 @@ pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
 pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
     decrease_tick();
     if is_expired() {
+        // debug!("[TIMER] {:#X}", current_context.rip);
         schedule_int(current_context);
     }
     LocalAPICRegisters::default().end_of_interrupt().notify();

@@ -7,7 +7,7 @@ use crate::{
 };
 use core::ptr::NonNull;
 
-const PROCESSTIME_COUNT: u64 = 0x1;
+const PROCESSTIME_COUNT: u64 = 0x4;
 const NUM_OF_PRIORITY: usize = 4;
 const PRIORITY_SIZE: usize = u8::MAX as usize / NUM_OF_PRIORITY + 1;
 

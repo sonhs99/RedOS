@@ -1,13 +1,16 @@
 use log::debug;
 
+use crate::allocator::free;
+use crate::interrupt::apic::LocalAPICRegisters;
 use crate::interrupt::without_interrupts;
+use crate::task::STACK_SIZE;
 
 use super::Schedulable;
 use super::SCHEDULER;
 use super::TASK_MANAGER;
 
 pub fn idle_task() {
-    debug!("IDLE: IDLE Task Started");
+    debug!("[IDLE] IDLE Task Started");
     loop {
         without_interrupts(|| {
             let mut scheduler = SCHEDULER.lock();
@@ -54,6 +57,7 @@ pub fn idle_task() {
                         }
                     }
                     // debug!("Task {} is ended", task.id);
+                    free(task.stack_addr as *mut u8, STACK_SIZE, STACK_SIZE);
                     TASK_MANAGER.lock().free(task);
                 }
             }

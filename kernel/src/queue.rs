@@ -119,6 +119,16 @@ impl<N: Node> ListQueue<N> {
             if let Some(mut prev) = prev_node {
                 prev.as_mut().set_next(next_node);
             }
+            if let Some(head) = self.head {
+                if head == node {
+                    self.head = next_node;
+                }
+            }
+            if let Some(tail) = self.tail {
+                if tail == node {
+                    self.tail = prev_node;
+                }
+            }
         }
     }
 

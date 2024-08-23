@@ -1,5 +1,5 @@
+pub mod block;
 pub mod driver;
-pub mod hdd;
 pub mod pci;
 // pub mod ps2;
 pub mod xhc;

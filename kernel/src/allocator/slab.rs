@@ -4,7 +4,7 @@ use log::debug;
 
 use crate::task::Task;
 
-use super::{dump::DumpAllocator, Allocator};
+use super::{dump::DumpAllocator, frame::FrameAllocator, Allocator};
 
 const NUM_OF_SLAB: usize = 8;
 
@@ -99,8 +99,8 @@ impl Block {
 }
 
 pub struct SlabAllocator {
-    slab: [Slab; NUM_OF_SLAB - 1],
-    fallback: DumpAllocator,
+    slab: [Slab; NUM_OF_SLAB],
+    fallback: FrameAllocator,
 }
 
 impl SlabAllocator {
@@ -109,13 +109,14 @@ impl SlabAllocator {
         let slab = [
             Slab::new(start_addr + 0 * slab_size, slab_size, 64),
             Slab::new(start_addr + 1 * slab_size, slab_size, 128),
-            Slab::new(start_addr + 3 * slab_size, slab_size, 256),
-            Slab::new(start_addr + 4 * slab_size, slab_size, 512),
-            Slab::new(start_addr + 5 * slab_size, slab_size, 1024),
-            Slab::new(start_addr + 6 * slab_size, slab_size, 2048),
-            Slab::new(start_addr + 7 * slab_size, slab_size, 4096),
+            Slab::new(start_addr + 2 * slab_size, slab_size, 256),
+            Slab::new(start_addr + 3 * slab_size, slab_size, 512),
+            Slab::new(start_addr + 4 * slab_size, slab_size, 1024),
+            Slab::new(start_addr + 5 * slab_size, slab_size, 2048),
+            Slab::new(start_addr + 6 * slab_size, slab_size, 4096),
+            Slab::new(start_addr + 7 * slab_size, slab_size, 8192),
         ];
-        let fallback = DumpAllocator::new(start_addr + 8 * slab_size, slab_size);
+        let fallback = FrameAllocator::new();
         Self { slab, fallback }
     }
 

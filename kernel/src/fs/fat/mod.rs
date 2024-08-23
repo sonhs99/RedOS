@@ -6,7 +6,7 @@ use alloc::{boxed::Box, vec::Vec};
 use log::debug;
 
 use super::{DirectoryDescriptor, FileDescriptor, FileSystem};
-use crate::device::hdd::{Block, BlockIO};
+use crate::device::block::{Block, BlockIO};
 
 // in progress
 // pub mod fat16;
