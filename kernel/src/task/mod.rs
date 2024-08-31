@@ -2,7 +2,7 @@ pub mod idle;
 mod manager;
 pub mod scheduler;
 
-use core::ptr::NonNull;
+use core::{ptr::NonNull, usize};
 
 use log::{debug, error};
 use manager::TaskManager;
@@ -11,10 +11,10 @@ use scheduler::{prr::PriorityRoundRobinScheduler, rr::RoundRobinScheduler, Sched
 use crate::{
     allocator::malloc,
     float::{clear_ts, fpu_load, fpu_save, set_ts},
-    interrupt::without_interrupts,
+    interrupt::{apic::LocalAPICRegisters, without_interrupts},
     println,
     queue::Node,
-    sync::{Mutex, OnceLock},
+    sync::{Mark, Mutex, OnceLock},
 };
 
 #[derive(Clone, Copy)]
@@ -76,6 +76,9 @@ pub struct Task {
 
     memory_addr: u64,
     memory_size: u64,
+
+    apic_id: u8,
+    affinity: Option<u8>,
 }
 
 impl Task {
@@ -87,7 +90,9 @@ impl Task {
         stack_size: u64,
         memory_addr: u64,
         memory_size: u64,
+        affinity: Option<u8>,
     ) -> Self {
+        let apic_id = LocalAPICRegisters::default().local_apic_id().id();
         let mut context = Context::empty();
 
         context.rsp = stack_addr + stack_size - 8;
@@ -123,6 +128,8 @@ impl Task {
             sibling: None,
             memory_addr,
             memory_size,
+            apic_id,
+            affinity,
         }
     }
 
@@ -153,6 +160,8 @@ impl Task {
             sibling: None,
             memory_addr: 0,
             memory_size: 0,
+            apic_id: 0,
+            affinity: None,
         }
     }
 
@@ -368,74 +377,142 @@ impl FPUContext {
 const STACK_SIZE: usize = 0x2000;
 
 static TASK_MANAGER: OnceLock<Mutex<TaskManager>> = OnceLock::new();
-pub static SCHEDULER: OnceLock<Mutex<PriorityRoundRobinScheduler>> = OnceLock::new();
+pub static SCHEDULER: [OnceLock<Mark<Mutex<PriorityRoundRobinScheduler>>>; 16] =
+    [const { OnceLock::new() }; 16];
 
 pub fn schedule() {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     let _ = without_interrupts(|| {
-        let mut scheduler = SCHEDULER.get()?.lock();
+        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
 
-        if running_task.flags.is_terminated() {
-            scheduler.push_wait(running_task);
-        } else {
-            scheduler.push_task(running_task);
-        }
         scheduler.set_running_task(next_task);
-        // println!("schedule {} -> {}", running_task.id, next_task.id);
+        scheduler.reset_tick();
+
         running_task.fpu_context.save();
         next_task.fpu_context.load();
+
+        if running_task.flags.is_terminated() {
+            scheduler.push_wait(running_task);
+            drop(scheduler);
+        } else {
+            // scheduler.push_task(running_task);
+            drop(scheduler);
+            push_task_load_balance(running_task);
+        }
+        // println!("schedule {} -> {}", running_task.id, next_task.id);
+
         running_task.context().switch_to(next_task.context());
-        scheduler.reset_tick();
         Some(())
     });
 }
 
 pub fn schedule_int(context: &mut Context) {
-    // debug!("switching");
-    // debug!("[SCHD] {:#X?}", context);
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     let _ = without_interrupts(|| {
-        let mut scheduler = SCHEDULER.get()?.lock();
+        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
         let mut next_task = unsafe { scheduler.next_task()?.as_mut() };
         let mut running_task = unsafe { scheduler.running_task()?.as_mut() };
 
-        if running_task.flags.is_terminated() {
-            scheduler.push_wait(running_task);
-        } else {
-            scheduler.push_task(running_task);
-        }
-        // debug!("[SCHD] Next    {}, {:#X?}", next_task.id, next_task.context);
-        // loop {}
         scheduler.set_running_task(next_task);
+        scheduler.reset_tick();
 
         running_task.fpu_context.save();
         running_task.context = *context;
         next_task.fpu_context.load();
         *context = next_task.context;
-        scheduler.reset_tick();
+
+        if running_task.flags.is_terminated() {
+            scheduler.push_wait(running_task);
+            drop(scheduler);
+        } else {
+            // scheduler.push_task(running_task);
+            drop(scheduler);
+            push_task_load_balance(running_task);
+        }
+        // debug!("[SCHD] current {}", running_task.id);
+
         Some(())
     });
 }
 
+fn push_task_load_balance(task: &mut Task) {
+    let target_id = match task.affinity {
+        Some(id) => id,
+        None => {
+            let mut min_id = task.apic_id;
+            let mut min = usize::MAX;
+            for (id, sched) in SCHEDULER
+                .iter()
+                .enumerate()
+                .filter_map(|(id, sched)| sched.get().map(|sched| (id as u8, sched.skip())))
+            {
+                if id == task.apic_id {
+                    continue;
+                }
+                let load = sched.without_lock().load(&task);
+                if load < min {
+                    min = load;
+                    min_id = id;
+                }
+            }
+            min_id
+        }
+    };
+    // debug!("[SCHED] pid={}, {} -> {}", task.id, task.apic_id, target_id);
+    task.apic_id = target_id;
+    SCHEDULER[target_id as usize].skip().lock().push_task(task);
+}
+
 pub fn is_expired() -> bool {
-    SCHEDULER.lock().is_expired()
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
+    SCHEDULER[apic_id].skip().lock().is_expired()
 }
 
 pub fn decrease_tick() {
-    SCHEDULER.lock().tick();
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
+    SCHEDULER[apic_id].skip().lock().tick();
 }
 
 pub fn init_task() {
-    let mut manager = TASK_MANAGER
-        .get_or_init(|| Mutex::new(TaskManager::new()))
-        .lock();
-    let scheduler = SCHEDULER.get_or_init(|| Mutex::new(PriorityRoundRobinScheduler::new()));
-    let task = manager.allocate().unwrap();
-    scheduler.lock().set_running_task(task);
-    task.flags = *TaskFlags::new().set_priority(0);
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
+    {
+        let mut manager = TASK_MANAGER
+            .get_or_init(|| Mutex::new(TaskManager::new()))
+            .lock();
+        let mut scheduler = SCHEDULER[apic_id as usize]
+            .get_or_init(|| Mark::new(Mutex::new(PriorityRoundRobinScheduler::new())));
+        let task = manager.allocate().unwrap();
+        scheduler.skip().lock().set_running_task(task);
+        task.flags = *TaskFlags::new().set_priority(0);
+        task.affinity = Some(apic_id as u8);
+    }
 
     create_task(
         TaskFlags::new().set_priority(0xFF).clone(),
+        Some(apic_id as u8),
+        idle::idle_task as u64,
+        0,
+        0,
+    );
+}
+
+pub fn init_task_ap() {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
+    {
+        let mut manager = TASK_MANAGER.lock();
+        SCHEDULER[apic_id as usize]
+            .get_or_init(|| Mark::new(Mutex::new(PriorityRoundRobinScheduler::new())));
+        let task = manager.allocate().unwrap();
+        SCHEDULER[apic_id].skip().lock().set_running_task(task);
+        task.flags = *TaskFlags::new().set_priority(0);
+        task.affinity = Some(apic_id as u8);
+    }
+
+    create_task(
+        TaskFlags::new().set_priority(0xFF).clone(),
+        Some(apic_id as u8),
         idle::idle_task as u64,
         0,
         0,
@@ -444,89 +521,108 @@ pub fn init_task() {
 
 pub fn create_task(
     flag: TaskFlags,
+    affinity: Option<u8>,
     entry_point: u64,
     memory_addr: u64,
     memory_size: u64,
 ) -> Result<(), ()> {
-    let mut manager = TASK_MANAGER.lock();
-    let task = manager.allocate()?;
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    without_interrupts(|| {
+        let mut manager = TASK_MANAGER.lock();
+        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
+        let task = manager.allocate()?;
+        let parent_task = scheduler.running_task();
 
-    let parent_task = SCHEDULER.lock().running_task();
-    let stack_addr = malloc(STACK_SIZE, STACK_SIZE) as u64;
-    // let stack_addr = TASK_STACK.get().ok_or(())? + STACK_SIZE as u64 * task.id;
+        let stack_addr = malloc(STACK_SIZE, STACK_SIZE) as u64;
 
-    let (memory_addr, memory_size) = if flag.is_thread() {
-        unsafe {
-            (
-                parent_task.unwrap().as_mut().memory_addr,
-                parent_task.unwrap().as_mut().memory_size,
-            )
+        let (memory_addr, memory_size) = if flag.is_thread() {
+            unsafe {
+                (
+                    parent_task.unwrap().as_mut().memory_addr,
+                    parent_task.unwrap().as_mut().memory_size,
+                )
+            }
+        } else {
+            (memory_addr, memory_size)
+        };
+        *task = Task::new(
+            task.id,
+            flag,
+            entry_point,
+            stack_addr,
+            STACK_SIZE as u64,
+            memory_addr,
+            memory_size,
+            affinity,
+        );
+        // debug!("stack_addr = {stack_addr:#X}");
+
+        task.parent = parent_task;
+        if let Some(mut parent) = parent_task {
+            let parent = unsafe { parent.as_mut() };
+            task.sibling = parent.child;
+            parent.child = NonNull::new(task);
         }
-    } else {
-        (memory_addr, memory_size)
-    };
-    *task = Task::new(
-        task.id,
-        flag,
-        entry_point,
-        stack_addr,
-        STACK_SIZE as u64,
-        memory_addr,
-        memory_size,
-    );
-    // debug!("stack_addr = {stack_addr:#X}");
 
-    task.parent = parent_task;
-    if let Some(mut parent) = parent_task {
-        let parent = unsafe { parent.as_mut() };
-        task.sibling = parent.child;
-        parent.child = NonNull::new(task);
-    }
-
-    SCHEDULER.lock().push_task(task);
-    Ok(())
+        scheduler.push_task(task);
+        Ok(())
+    })
 }
 
 pub fn end_task(id: u64) {
-    let mut manager = TASK_MANAGER.lock();
-    let task = match manager.get(id) {
-        Some(task) => task,
-        None => {
-            without_interrupts(|| {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    without_interrupts(|| {
+        let mut manager = TASK_MANAGER.lock();
+        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
+        let task = match manager.get(id) {
+            Some(task) => task,
+            None => {
                 error!("Task {id} Not Found");
                 for task_ in manager.iter() {
                     debug!("id={}, Task {}, flag={}", id, task_.id, id == task_.id);
                 }
-            });
+                loop {}
+            }
+        };
+        // let task = manager.get(id).unwrap();
+        task.flags.terminate();
+        if unsafe { { scheduler.running_task().unwrap() }.as_mut() }.id == id {
+            drop(manager);
+            drop(scheduler);
+            schedule();
             loop {}
+        } else {
+            scheduler.remove_task(task);
+            scheduler.push_wait(task);
+            debug!("asdf");
         }
-    };
-    // let task = manager.get(id).unwrap();
-    // debug!("exit");
-    task.flags.terminate();
-    if unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() }.id == id {
-        schedule();
-        loop {}
-    } else {
-        SCHEDULER.lock().remove_task(task);
-        SCHEDULER.lock().push_wait(task);
-    }
+    })
 }
 
 pub fn exit() {
-    let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
+    let running_task = running_task().unwrap();
     end_task(running_task.id);
 }
 
 fn exit_inner() {
     use core::arch::asm;
     unsafe { asm!("sub rsp, 8") };
-    let running_task = unsafe { { SCHEDULER.lock().running_task().unwrap() }.as_mut() };
+    let running_task = running_task().unwrap();
     end_task(running_task.id);
 }
 
 pub fn running_task() -> Option<&'static mut Task> {
-    unsafe { Some(SCHEDULER.lock().running_task()?.as_mut()) }
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    without_interrupts(|| unsafe {
+        Some(
+            SCHEDULER[apic_id as usize]
+                .skip()
+                .lock()
+                .running_task()?
+                .clone()
+                .as_mut(),
+        )
+    })
 }
 
 pub fn get_task_from_id(id: u64) -> Option<&'static mut Task> {

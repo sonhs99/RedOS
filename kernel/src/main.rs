@@ -3,7 +3,8 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, format, string::String, vec};
+use alloc::vec;
+use alloc::{boxed::Box, format, string::String, vec::Vec};
 use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
@@ -21,7 +22,7 @@ use kernel::{
         driver::keyboard::{get_code, getch, Keyboard},
         pci::{
             init_pci,
-            msi::{Message, Msi},
+            msi::{init_routing_table, MSIEntry, Message, Msi},
             search::{Base, Interface, PciSearcher, Sub},
             switch_ehci_to_xhci, Pci, PciDevice,
         },
@@ -39,7 +40,7 @@ use kernel::{
     },
     ioapic,
     page::init_page,
-    print, println,
+    percpu, print, println,
     task::{create_task, exit, idle, init_task, running_task, schedule, TaskFlags},
     timer::init_pm,
 };
@@ -89,6 +90,7 @@ fn kernel_main(boot_info: BootInfo) {
     info!("ACPI Initialized");
 
     let num_core = ioapic::init();
+    percpu::init(num_core);
     info!("I/O APIC Initialized");
     info!("Number Of Core: {num_core}");
 
@@ -104,21 +106,24 @@ fn kernel_main(boot_info: BootInfo) {
     info!("Enable APIC Timer Interrupt");
     set_interrupt(true);
 
-    // if boot_info.ap_bootstrap.is_some() {
-    //     let wake_up_count = init_ap(
-    //         num_core,
-    //         boot_info.stack_frame.0,
-    //         boot_info.stack_frame.1 as u64,
-    //     )
-    //     .expect("AP Wakeup Failed");
-    //     info!("{wake_up_count} AP Wakeup");
-    // }
+    if boot_info.ap_bootstrap.is_some() {
+        let wake_up_count = init_ap(
+            num_core,
+            boot_info.stack_frame.0,
+            boot_info.stack_frame.1 as u64,
+        )
+        .expect("AP Wakeup Failed");
+        info!("{wake_up_count} AP Wakeup");
+    }
+
+    // loop {}
 
     info!("PCI Init Started");
     init_pci();
 
-    create_task(TaskFlags::new(), test as u64, 0, 0);
+    create_task(TaskFlags::new(), None, test as u64, 0, 0);
 
+    let mut msi_vector: Vec<MSIEntry> = Vec::new();
     match PciSearcher::new()
         .base(Base::Serial)
         .sub(Sub::USB)
@@ -154,10 +159,12 @@ fn kernel_main(boot_info: BootInfo) {
                         debug!("MSI Initialize Start");
                         msi.enable(&msg);
                         debug!("MSI Initialize Success");
+                        msi_vector.push(MSIEntry::MSI(msi.device.clone(), msi.offset));
                     } else if let Some(msi) = cap.msix() {
                         debug!("MSI-X Initialize Start");
                         msi.enable(&msg);
                         debug!("MSI-X Initialize Success");
+                        msi_vector.push(MSIEntry::MSIX(msi.table(), 0));
                     }
                 });
 
@@ -169,10 +176,11 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
-            create_task(TaskFlags::new(), print_input as u64, 0, 0);
+            create_task(TaskFlags::new(), None, print_input as u64, 0, 0);
         }
         None => {}
     }
+
     match PciSearcher::new()
         .base(Base::MassStorage)
         .sub(Sub::IDE)
@@ -213,15 +221,23 @@ fn kernel_main(boot_info: BootInfo) {
             for (idx, dev_name) in dev_list().iter().enumerate() {
                 info!("[{idx}] {dev_name}");
             }
-            create_task(TaskFlags::new(), test_fs as u64, 0, 0);
+            create_task(TaskFlags::new(), None, test_fs as u64, 0, 0);
         }
         None => {}
     }
+
+    init_routing_table(msi_vector);
 }
 
 fn print_input() {
     loop {
         print!("{}", getch() as char);
+    }
+}
+
+fn test_print() {
+    for _ in 0..3000 {
+        print!("a");
     }
 }
 
@@ -379,6 +395,7 @@ fn test() {
     for i in 0..50 {
         create_task(
             TaskFlags::new().thread().set_priority(66).clone(),
+            None,
             test_thread as u64,
             0,
             0,
@@ -387,6 +404,7 @@ fn test() {
     for i in 0..50 {
         create_task(
             TaskFlags::new().thread().set_priority(130).clone(),
+            None,
             test_thread as u64,
             0,
             0,
@@ -395,6 +413,7 @@ fn test() {
     for i in 0..50 {
         create_task(
             TaskFlags::new().thread().set_priority(200).clone(),
+            None,
             test_thread as u64,
             0,
             0,

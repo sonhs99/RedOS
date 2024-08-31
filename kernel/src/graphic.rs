@@ -2,7 +2,7 @@ use bootloader::{FrameBufferConfig, PixelFormat};
 
 use core::ptr::slice_from_raw_parts_mut;
 
-use crate::sync::{Mutex, OnceLock};
+use crate::sync::{Mutex, MutexGuard, OnceLock, StaticCell};
 
 pub static PIXEL_WRITER: OnceLock<Mutex<GraphicWriter>> = OnceLock::new();
 

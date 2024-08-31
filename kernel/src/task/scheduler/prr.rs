@@ -1,4 +1,5 @@
 use log::debug;
+use x86_64::instructions::interrupts::without_interrupts;
 
 use super::Schedulable;
 use crate::{
@@ -91,13 +92,15 @@ impl Schedulable for PriorityRoundRobinScheduler {
     }
 
     fn change_priority(&mut self, id: u64, priority: u8) -> Result<(), ()> {
-        let mut manager = TASK_MANAGER.lock();
-        let task = manager.get(id).ok_or(())?;
-        if unsafe { self.running.unwrap().as_mut() }.id != id {
-            self.remove_task(task);
-        }
-        task.flags.set_priority(priority);
-        Ok(())
+        without_interrupts(|| {
+            let mut manager = TASK_MANAGER.lock();
+            let task = manager.get(id).ok_or(())?;
+            if unsafe { self.running.unwrap().as_mut() }.id != id {
+                self.remove_task(task);
+            }
+            task.flags.set_priority(priority);
+            Ok(())
+        })
     }
 
     fn remove_task(&mut self, task: &mut Task) -> Result<(), ()> {
@@ -105,5 +108,10 @@ impl Schedulable for PriorityRoundRobinScheduler {
         let queue_idx = Self::get_priority(priority);
         self.queues[queue_idx].remove(NonNull::new(task).ok_or(())?);
         Ok(())
+    }
+
+    fn load(&self, task: &Task) -> usize {
+        let priority = Self::get_priority(task.flags.priority());
+        self.queues[priority].length()
     }
 }

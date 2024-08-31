@@ -68,4 +68,8 @@ impl Schedulable for RoundRobinScheduler {
         self.queue.remove(NonNull::new(task).ok_or(())?);
         Ok(())
     }
+
+    fn load(&self, task: &Task) -> usize {
+        self.queue.length()
+    }
 }

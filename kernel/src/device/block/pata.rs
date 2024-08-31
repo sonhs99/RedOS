@@ -7,6 +7,7 @@ use core::{
 };
 
 use log::{debug, error};
+use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
     device::Port,
@@ -295,10 +296,17 @@ impl HDD {
         let start = read_pm_count();
         while read_pm_count().wrapping_sub(start) <= convert_ms_to_tick(PATA_WAIT_TIME) {
             {
-                let pata = PATA.lock();
-                if hint::black_box(primary == pata.primary_interrupt)
-                    || hint::black_box(!primary == pata.secondary_interrupt)
-                {
+                let result = without_interrupts(|| {
+                    let pata = PATA.without_lock();
+                    if hint::black_box(primary == pata.primary_interrupt)
+                        || hint::black_box(!primary == pata.secondary_interrupt)
+                    {
+                        Ok(())
+                    } else {
+                        Err(())
+                    }
+                });
+                if result.is_ok() {
                     return Ok(());
                 }
             }
@@ -468,7 +476,7 @@ pub fn init_pata() {
 }
 
 pub fn set_interrupt_flag(primary: bool) {
-    PATA.lock().set_interrupt_flag(primary, true);
+    PATA.without_lock().set_interrupt_flag(primary, true);
 }
 
 pub fn get_device(index: u8) -> Result<HDD, ()> {

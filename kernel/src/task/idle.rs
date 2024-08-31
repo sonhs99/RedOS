@@ -10,10 +10,11 @@ use super::SCHEDULER;
 use super::TASK_MANAGER;
 
 pub fn idle_task() {
-    debug!("[IDLE] IDLE Task Started");
+    // debug!("[IDLE] IDLE Task Started");
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
     loop {
         without_interrupts(|| {
-            let mut scheduler = SCHEDULER.lock();
+            let mut scheduler = SCHEDULER[apic_id].skip().lock();
             while let Some(mut wait_task) = scheduler.next_wait() {
                 let task = unsafe { wait_task.as_mut() };
                 if task.child != None {

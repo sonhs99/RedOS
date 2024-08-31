@@ -16,6 +16,7 @@ pub fn set_interrupt(flag: bool) -> bool {
     rflags & 0x0200 != 0
 }
 
+#[inline]
 pub fn without_interrupts<F, T>(mut inner: F) -> T
 where
     F: FnMut() -> T,

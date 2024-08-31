@@ -1,6 +1,7 @@
 *target
 /esp
 dump.txt
+debug.txt
 hdd.img
 OVMF_CODE.fd
 OVMF_VARS.fd

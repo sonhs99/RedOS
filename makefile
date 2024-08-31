@@ -1,4 +1,4 @@
-QEMU := qemu-system-x86_64 -m 512M -smp 4\
+QEMU := qemu-system-x86_64 -m 512M -smp 2 -d int,cpu_reset -D debug.txt \
     -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
     -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd \
     -drive format=raw,file=fat:rw:esp \

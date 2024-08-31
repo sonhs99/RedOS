@@ -23,6 +23,7 @@ pub mod graphic;
 pub mod interrupt;
 pub mod ioapic;
 pub mod page;
+pub mod percpu;
 mod queue;
 mod sync;
 pub mod task;
@@ -30,6 +31,7 @@ pub mod timer;
 pub mod window;
 
 use core::panic::PanicInfo;
+use interrupt::apic::LocalAPICRegisters;
 use log::error;
 use task::{exit, running_task};
 
@@ -56,13 +58,14 @@ macro_rules! entry_point {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     if let Some(running) = running_task() {
-        error!("PID={}\n{}", running.id(), info);
+        error!("Core={},PID={}\n{}", apic_id, running.id(), info);
         if running.id() > 1 {
             exit();
         }
     } else {
-        error!("{}", info);
+        error!("Core={}\n{}", apic_id, info);
     }
     loop {}
 }

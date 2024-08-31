@@ -22,7 +22,7 @@ impl Keyboard {
 
     pub fn usb(&self) -> USBKeyboardDriver {
         USBKeyboardDriver::new(|byte, key| unsafe {
-            without_interrupts(|| QUEUE.lock().enqueue(key));
+            QUEUE.lock().enqueue(key);
         })
     }
 }
@@ -31,7 +31,7 @@ pub fn get_code() -> Key {
     while QUEUE.lock().is_empty() {
         schedule();
     }
-    without_interrupts(|| QUEUE.lock().dequeue().unwrap())
+    QUEUE.lock().dequeue().unwrap()
 }
 
 pub fn getch() -> u8 {

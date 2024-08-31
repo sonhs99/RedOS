@@ -1,6 +1,7 @@
 use crate::{
+    interrupt::without_interrupts,
     println,
-    sync::{Mutex, OnceLock},
+    sync::{Mark, Mutex, OnceLock},
 };
 use bootloader::MemoryMap;
 use core::{
@@ -48,7 +49,7 @@ pub trait Allocator {
 }
 
 #[global_allocator]
-static ALLOCATOR: OnceLock<Mutex<slab::SlabAllocator>> = OnceLock::new();
+static ALLOCATOR: OnceLock<Mark<Mutex<slab::SlabAllocator>>> = OnceLock::new();
 
 pub(crate) static FRAME_MANAGER: OnceLock<Mutex<frame::FrameBitmapManager>> = OnceLock::new();
 
@@ -61,7 +62,10 @@ pub fn init_heap(memory_map: &MemoryMap) {
     let end_addr = (end.id() * BYTE_PER_FRAME) as usize;
     debug!("{start_addr:#X} - {end_addr:#X}");
     ALLOCATOR.get_or_init(|| unsafe {
-        Mutex::new(slab::SlabAllocator::new(start_addr, end_addr - start_addr))
+        Mark::new(Mutex::new(slab::SlabAllocator::new(
+            start_addr,
+            end_addr - start_addr,
+        )))
     });
 }
 
@@ -83,14 +87,15 @@ fn align(base: u64, align: u64) -> u64 {
     }
 }
 
-unsafe impl<A: Allocator> GlobalAlloc for OnceLock<Mutex<A>> {
+unsafe impl<A: Allocator> GlobalAlloc for OnceLock<Mark<Mutex<A>>> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.lock()
+        self.skip()
+            .lock()
             .allocate(layout)
             .unwrap_or(ptr::null_mut() as *mut u8)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.lock().free(ptr, layout)
+        self.skip().lock().free(ptr, layout)
     }
 }

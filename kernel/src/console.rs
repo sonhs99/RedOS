@@ -3,13 +3,13 @@ use core::{fmt, ptr::write_bytes};
 use crate::{
     font::write_ascii,
     graphic::{get_graphic, GraphicWriter, PixelColor},
-    interrupt::without_interrupts,
-    sync::{Mutex, OnceLock},
+    interrupt::{apic::LocalAPICRegisters, without_interrupts},
+    sync::{Mark, Mutex, OnceLock},
 };
 
 use log::{Level, Log};
 
-pub static CONSOLE: OnceLock<Mutex<Console>> = OnceLock::new();
+pub static CONSOLE: OnceLock<Mark<Mutex<Console>>> = OnceLock::new();
 pub static LOGGER: ConsoleLogger = ConsoleLogger;
 
 pub struct Console {
@@ -109,7 +109,7 @@ impl fmt::Write for Console {
 }
 
 pub fn init_console(bg_color: PixelColor, fg_color: PixelColor) {
-    CONSOLE.get_or_init(|| Mutex::new(Console::new(bg_color, fg_color)));
+    CONSOLE.get_or_init(|| Mark::new(Mutex::new(Console::new(bg_color, fg_color))));
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug));
 }
 
@@ -141,7 +141,5 @@ impl Log for ConsoleLogger {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    without_interrupts(|| {
-        CONSOLE.lock().write_fmt(args).unwrap();
-    });
+    CONSOLE.skip().lock().write_fmt(args).unwrap();
 }

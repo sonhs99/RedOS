@@ -1,3 +1,5 @@
+use core::hint::spin_loop;
+
 use crate::{
     acpi::{FADT, FADT_CELL},
     device::Port,
@@ -39,6 +41,7 @@ pub fn wait_tick(tick: u32) {
     let start = read_pm_count();
     while read_pm_count().wrapping_sub(start) <= tick {
         // schedule();
+        spin_loop()
     }
 }
 

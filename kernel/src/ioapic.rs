@@ -7,7 +7,11 @@ use crate::{
         IOAPICEntry, IntNMIOverrideEntry, IntOverrideEntry, LocalAPICEntry, LocalNMIOverideEntry,
         LocalOverrideEntry, MADTHeader, MADT_CELL,
     },
-    interrupt::{apic::IOAPICRegister, InterruptVector},
+    interrupt::{
+        apic::{IOAPICRegister, LocalAPICRegisters},
+        InterruptVector,
+    },
+    percpu::get_cpu_count,
     sync::OnceLock,
 };
 
@@ -114,4 +118,52 @@ pub fn init() -> usize {
         io_apic.write(16 + int as u8 * 2 + 1, high);
     }
     num_core
+}
+
+static mut IRQ_INTERRUPT_COUNT: [[u64; 16]; 16] = [[0; 16]; 16];
+
+const LOADBALANCING_DIVIDER: u64 = 10;
+
+pub fn increase_int_count(irq: u8) {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    unsafe { IRQ_INTERRUPT_COUNT[apic_id as usize][irq as usize] += 1 };
+}
+
+pub fn load_balance_int(irq: u8) {
+    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    unsafe {
+        if IRQ_INTERRUPT_COUNT[apic_id as usize][irq as usize] % LOADBALANCING_DIVIDER != 0
+            || IRQ_INTERRUPT_COUNT[apic_id as usize][irq as usize] == 0
+        {
+            return;
+        }
+        let mut min_counted_core = 0u8;
+        let mut min_count = 0;
+        let mut reset_flag = false;
+        for core in 0..get_cpu_count() as u8 {
+            if IRQ_INTERRUPT_COUNT[core as usize][irq as usize] < min_count {
+                min_count = IRQ_INTERRUPT_COUNT[core as usize][irq as usize];
+                min_counted_core = core;
+            } else if IRQ_INTERRUPT_COUNT[core as usize][irq as usize] == u64::MAX {
+                reset_flag = true;
+            }
+        }
+
+        routing_int(irq, min_counted_core);
+
+        if reset_flag {
+            for core in 0..get_cpu_count() {
+                IRQ_INTERRUPT_COUNT[core][irq as usize] == 0;
+            }
+        }
+    }
+}
+
+fn routing_int(irq: u8, id: u8) {
+    let ioapic = IOAPICRegister::default();
+    let high = ioapic.read(16 + irq * 2 + 1);
+    let low = ioapic.read(16 + irq * 2);
+    let high = high & 0xFF00_0000 | (id as u32) << 24;
+    ioapic.write(16 + irq * 2 + 1, high);
+    ioapic.write(16 + irq * 2, low);
 }

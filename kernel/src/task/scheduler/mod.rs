@@ -14,6 +14,7 @@ pub trait Schedulable {
 
     fn next_task(&mut self) -> Option<NonNull<Task>>;
     fn push_task(&mut self, task: &mut Task);
+    fn load(&self, task: &Task) -> usize;
 
     // Wait Queue
     fn next_wait(&mut self) -> Option<NonNull<Task>>;

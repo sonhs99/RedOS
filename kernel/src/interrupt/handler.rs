@@ -3,17 +3,17 @@ use core::{arch::asm, hint::black_box};
 use log::debug;
 
 use crate::{
-    device::{block::pata::set_interrupt_flag, xhc::XHC},
+    device::{block::pata::set_interrupt_flag, pci::msi, xhc::XHC},
     float::{clear_ts, fpu_init, fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
-    println,
+    ioapic, println,
     task::{
         decrease_tick, exit, get_task_from_id, is_expired, running_task, schedule_int,
-        scheduler::Schedulable, Context, SCHEDULER,
+        scheduler::Schedulable, Context,
     },
 };
 
-use super::INT_FLAG;
+use super::{without_interrupts, InterruptVector, INT_FLAG};
 
 #[derive(Debug)]
 #[repr(C)]
@@ -245,6 +245,7 @@ macro_rules! handler_with_context{
 }
 
 pub extern "C" fn common_exception(stack_frame: &ExceptionStackFrame) {
+    unsafe { asm!("mov r10, 0xd0adbeef") };
     println!(
         "[EXCEP]: COMMON EXCEPTION at {:#X}\n{:#X?}",
         stack_frame.instruction_pointer, stack_frame
@@ -258,6 +259,7 @@ pub extern "C" fn divided_by_zero(stack_frame: &ExceptionStackFrame) {
 }
 
 pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
+    unsafe { asm!("mov r10, 0xdea0beef") };
     if let Some(running) = running_task() {
         println!("[EXCEP]: PID={}", running.id());
         println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
@@ -272,27 +274,14 @@ pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
     }
 }
 
-// pub extern "C" fn device_not_available(stack_frame: &ExceptionStackFrame, error_code: u64) {
-//     println!("[EXCEP]: DEVICE_NOT_AVAILABLE");
-//     clear_ts();
-//     let current = running_task();
-//     if let Some(last_id) = last_fpu_used() {
-//         if last_id == current.id() {
-//             return;
-//         } else if let Some(last) = get_task_from_id(last_id) {
-//             fpu_save(last.fpu_context());
-//         }
-//     }
-//     if !current.fpu_used() {
-//         fpu_init();
-//         current.set_fpu_used();
-//     } else {
-//         fpu_load(current.fpu_context());
-//     }
-//     set_fpu_used(current.id())
-// }
+pub extern "C" fn device_not_available(stack_frame: &ExceptionStackFrame, error_code: u64) {
+    unsafe { asm!("mov r10, 0xde0dbeef") };
+    println!("[EXCEP]: DEVICE_NOT_AVAILABLE with code {error_code}\n{stack_frame:#X?}");
+    loop {}
+}
 
 pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
+    unsafe { asm!("mov r10, 0xdeadb0ef") };
     if let Some(running) = running_task() {
         println!("[EXCEP]: PID={}", running.id());
         println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
@@ -308,11 +297,13 @@ pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64)
 }
 
 pub extern "C" fn double_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
+    unsafe { asm!("mov r10, 0xdeadbe0f") };
     println!("[EXCEP]: DOUBLE_FAULT with code {error_code}\n{stack_frame:#X?}");
     loop {}
 }
 
 pub extern "C" fn general_protection(stack_frame: &ExceptionStackFrame, error_code: u64) {
+    unsafe { asm!("mov r10, 0xdeadbee0") };
     if let Some(running) = running_task() {
         println!("[EXCEP]: PID={}", running.id());
         println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
@@ -341,6 +332,8 @@ pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
     if let Some(xhc) = XHC.get() {
         let _ = xhc.lock().process_all_event();
     }
+    msi::increase_int_count(0);
+    msi::load_balance_int(0);
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 
@@ -355,13 +348,19 @@ pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
 
 pub extern "C" fn pata1_handler(stack_frame: &ExceptionStackFrame) {
     // println!("[INTER]: PATA1");
+    let irq_idx = InterruptVector::PATA1 as u8 - InterruptVector::IRQStart as u8;
     black_box(set_interrupt_flag(true));
+    ioapic::increase_int_count(irq_idx);
+    ioapic::load_balance_int(irq_idx);
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 
 pub extern "C" fn pata2_handler(stack_frame: &ExceptionStackFrame) {
     // println!("[INTER]: PATA2");
+    let irq_idx = InterruptVector::PATA2 as u8 - InterruptVector::IRQStart as u8;
     black_box(set_interrupt_flag(false));
+    ioapic::increase_int_count(irq_idx);
+    ioapic::load_balance_int(irq_idx);
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 

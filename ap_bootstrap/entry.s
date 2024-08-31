@@ -40,7 +40,7 @@ START32:
 
     mov eax, cr0
     or  eax, 0xE000000E
-    xor eax, 0x60000004
+    xor eax, 0x6000000C
     mov cr0, eax
     
     jmp 0x08:START64
@@ -74,8 +74,12 @@ START64:
     sub rsp, rax
     sub rbp, rax
 
+    push qword ENDLESS
     mov rax, qword [AP_ENTRY_POINT]
     jmp rax
+
+ENDLESS:
+    jmp ENDLESS
 
 align 8, db 0
 dw 0x0000

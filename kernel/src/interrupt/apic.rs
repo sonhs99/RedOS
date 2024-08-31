@@ -84,7 +84,7 @@ impl APICTimer {
         wait_ms(100);
         let elapse = self.elapsed();
         TICK_PER_100MILISECOND.get_or_init(|| elapse);
-        debug!("APIC Timer: {elapse} Tick/100ms");
+        // debug!("APIC Timer: {elapse} Tick/100ms");
         unsafe {
             write_volatile((self.0 + Self::DIVIDER) as *mut u32, divider as u32);
             write_volatile((self.0 + Self::LVT_TIMER) as *mut u32, data);
