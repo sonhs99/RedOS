@@ -431,7 +431,6 @@ pub fn schedule_int(context: &mut Context) {
             drop(scheduler);
             push_task_load_balance(running_task);
         }
-        // debug!("[SCHD] current {}", running_task.id);
 
         Some(())
     });
@@ -460,7 +459,13 @@ fn push_task_load_balance(task: &mut Task) {
             min_id
         }
     };
-    // debug!("[SCHED] pid={}, {} -> {}", task.id, task.apic_id, target_id);
+    // debug!(
+    //     "[SCHED] pid={:3}, {} -> {} {}",
+    //     task.id,
+    //     task.apic_id,
+    //     target_id,
+    //     task.flags.priority()
+    // );
     task.apic_id = target_id;
     SCHEDULER[target_id as usize].skip().lock().push_task(task);
 }
@@ -506,17 +511,9 @@ pub fn init_task_ap() {
             .get_or_init(|| Mark::new(Mutex::new(PriorityRoundRobinScheduler::new())));
         let task = manager.allocate().unwrap();
         SCHEDULER[apic_id].skip().lock().set_running_task(task);
-        task.flags = *TaskFlags::new().set_priority(0);
+        task.flags = *TaskFlags::new().set_priority(0xFF);
         task.affinity = Some(apic_id as u8);
     }
-
-    create_task(
-        TaskFlags::new().set_priority(0xFF).clone(),
-        Some(apic_id as u8),
-        idle::idle_task as u64,
-        0,
-        0,
-    );
 }
 
 pub fn create_task(
@@ -570,10 +567,8 @@ pub fn create_task(
 }
 
 pub fn end_task(id: u64) {
-    let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     without_interrupts(|| {
         let mut manager = TASK_MANAGER.lock();
-        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
         let task = match manager.get(id) {
             Some(task) => task,
             None => {
@@ -584,6 +579,16 @@ pub fn end_task(id: u64) {
                 loop {}
             }
         };
+        let mut cap_scheduler = None;
+        while true {
+            let apic_id = task.apic_id;
+            let scheduler = SCHEDULER[task.apic_id as usize].skip().lock();
+            if task.apic_id == apic_id {
+                cap_scheduler = Some(scheduler);
+                break;
+            }
+        }
+        let mut scheduler = cap_scheduler.unwrap();
         // let task = manager.get(id).unwrap();
         task.flags.terminate();
         if unsafe { { scheduler.running_task().unwrap() }.as_mut() }.id == id {
@@ -594,7 +599,6 @@ pub fn end_task(id: u64) {
         } else {
             scheduler.remove_task(task);
             scheduler.push_wait(task);
-            debug!("asdf");
         }
     })
 }

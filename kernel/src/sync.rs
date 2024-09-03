@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use log::debug;
 
 use crate::font::write_ascii;
-use crate::graphic::PixelColor;
+use crate::graphic::{get_graphic, PixelColor};
 use crate::interrupt::apic::LocalAPICRegisters;
 use crate::interrupt::{asm, set_interrupt};
 
@@ -54,16 +54,17 @@ impl<T> Mark<T> {
         }
     }
 
-    pub fn mark(&self) -> MarkGuard<T> {
+    pub fn mark(&self, index: u8) -> MarkGuard<T> {
         let apic_id = LocalAPICRegisters::default().local_apic_id().id();
         let id = unsafe { *self.id.get() };
         let byte = if id == 0xFF { b' ' } else { b'0' + id };
         write_ascii(
-            800,
+            800 + (index as u64) * 8,
             0,
             byte,
             PixelColor::Black,
             COLOR[(apic_id % 4) as usize],
+            &mut get_graphic().lock(),
         );
         unsafe { *self.id.get() = apic_id };
         MarkGuard { mark: self }

@@ -96,6 +96,7 @@ dependencies = [
  "hashbrown",
  "log",
  "modular-bitfield",
+ "static-box",
  "x86_64",
  "xhci",
 ]
@@ -202,6 +203,12 @@ name = "rustversion"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "955d28af4278de8121b7ebeb796b6a45735dc01436d898801014aced2773a3d6"
+
+[[package]]
+name = "static-box"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99e1ad384eb01f74a4dc1b4febc3b1ec845f02f700979bdeb041c80fde7f3271"
 
 [[package]]
 name = "static_assertions"

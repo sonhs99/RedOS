@@ -291,7 +291,7 @@ impl RootFS {
     pub fn open_dir(&mut self, dev_name: &str, port: u16, path: &str) -> Result<Directory, ()> {
         let entry = self.tree.get_mut(dev_name).ok_or(())?;
         let fs = entry.file_systems.get_mut(port as usize).ok_or(())?;
-        debug!("path={path}");
+        // debug!("path={path}");
         let mut dir = fs.root_dir(&mut entry.device)?;
         if path != "/" {
             let splited_path: Vec<&str> = path[1..].split('/').collect();
@@ -378,9 +378,9 @@ pub fn open(dev_name: &str, port: u16, file_name: &str, mode: &[u8]) -> Result<F
         }
     }
     write = write || append;
-    debug!("read={read}, write={write}, append={append}");
+    // debug!("read={read}, write={write}, append={append}");
     let mut search = ROOT_FS.lock().open_file(dev_name, port, file_name);
-    debug!("{}", search.is_ok());
+    // debug!("{}", search.is_ok());
     let mut file = match search {
         Ok(mut file) => {
             if write {
@@ -388,7 +388,7 @@ pub fn open(dev_name: &str, port: u16, file_name: &str, mode: &[u8]) -> Result<F
                     .lock()
                     .shrink_file(&mut file)
                     .map_err(|err| "File Shrink Failed")?;
-                debug!("File has been Shrinked");
+                // debug!("File has been Shrinked");
             }
             file
         }

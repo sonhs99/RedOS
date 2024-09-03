@@ -1,6 +1,7 @@
 use crate::{
     graphic::{get_graphic, GraphicWriter, PixelColor},
     interrupt::without_interrupts,
+    window::Writable,
 };
 use core::include_bytes;
 
@@ -16,8 +17,14 @@ pub fn get_font(c: usize) -> Option<&'static [u8]> {
     }
 }
 
-pub fn write_ascii(x: u64, y: u64, c: u8, foreground: PixelColor, background: PixelColor) {
-    let writer = get_graphic().lock();
+pub fn write_ascii(
+    x: u64,
+    y: u64,
+    c: u8,
+    foreground: PixelColor,
+    background: PixelColor,
+    writer: &mut impl Writable,
+) {
     if let Some(font) = get_font(c as usize) {
         for dy in 0..16usize {
             for dx in 0..8usize {

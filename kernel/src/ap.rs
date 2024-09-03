@@ -7,6 +7,7 @@ use crate::console::CONSOLE;
 use crate::interrupt::apic::APICTimerMode;
 use crate::interrupt::{load_idt, set_interrupt, InterruptVector};
 use crate::sync::{Mutex, OnceLock};
+use crate::task::idle::idle_task;
 use crate::task::{init_task, init_task_ap};
 use crate::timer::sleep;
 use crate::{
@@ -82,14 +83,15 @@ fn ap_entry() {
     );
     set_interrupt(true);
     unsafe { asm!("lock inc dword ptr [{0}]", in(reg) (&CORE_WAKEUP_COUNT) as *const u32) };
-    test_ap()
+    test_ap();
+    loop {}
 }
 
 #[inline(never)]
 fn test_ap() {
     let apic_id = LocalAPICRegisters::default().local_apic_id().id();
-    loop {
-        wait_ms(500);
-        // info!("[{apic_id}] Hello, world!");
-    }
+    // loop {
+    //     info!("[{apic_id}] Hello, world!");
+    // }
+    idle_task();
 }

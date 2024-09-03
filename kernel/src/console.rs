@@ -5,17 +5,19 @@ use crate::{
     graphic::{get_graphic, GraphicWriter, PixelColor},
     interrupt::{apic::LocalAPICRegisters, without_interrupts},
     sync::{Mark, Mutex, OnceLock},
+    window::{frame::WindowFrame, render, Movable, WindowWriter},
 };
 
 use log::{Level, Log};
 
 pub static CONSOLE: OnceLock<Mark<Mutex<Console>>> = OnceLock::new();
+static WINDOW_WRITER: OnceLock<Mutex<WindowFrame>> = OnceLock::new();
 pub static LOGGER: ConsoleLogger = ConsoleLogger;
 
 pub struct Console {
     bg_color: PixelColor,
     fg_color: PixelColor,
-    buffer: [[u8; Console::Columns + 1]; Console::Rows],
+    buffer: [[u8; Console::Columns]; Console::Rows],
     cursor_column: u64,
     cursor_row: u64,
 }
@@ -23,13 +25,13 @@ pub struct Console {
 pub struct ConsoleLogger;
 
 impl Console {
-    pub const Rows: usize = 50;
-    pub const Columns: usize = 160;
+    pub const Rows: usize = 25;
+    pub const Columns: usize = 80;
     pub const fn new(bg_color: PixelColor, fg_color: PixelColor) -> Self {
         Self {
             bg_color,
             fg_color,
-            buffer: [[0u8; Console::Columns + 1]; Console::Rows],
+            buffer: [[0u8; Console::Columns]; Console::Rows],
             cursor_column: 0,
             cursor_row: 0,
         }
@@ -48,54 +50,94 @@ impl Console {
         match c {
             b'\n' => self.newline(),
             _ => {
-                if self.cursor_column >= Console::Columns as u64 {
+                if self.cursor_column > Console::Columns as u64 - 1 {
                     self.newline();
                 }
-                write_ascii(
-                    8 * self.cursor_column,
-                    16 * self.cursor_row,
-                    c,
-                    self.fg_color,
-                    self.bg_color,
-                );
+                match WINDOW_WRITER.get() {
+                    Some(writer) => write_ascii(
+                        8 * self.cursor_column,
+                        16 * self.cursor_row,
+                        c,
+                        self.fg_color,
+                        self.bg_color,
+                        &mut writer.lock(),
+                    ),
+                    None => write_ascii(
+                        8 * self.cursor_column,
+                        16 * self.cursor_row,
+                        c,
+                        self.fg_color,
+                        self.bg_color,
+                        &mut get_graphic().lock(),
+                    ),
+                }
                 self.buffer[self.cursor_row as usize][self.cursor_column as usize] = c;
                 self.cursor_column += 1
             }
         }
     }
 
-    fn cls(&mut self) {}
+    pub fn cls(&mut self) {
+        for y in 0..self.cursor_row {
+            self.buffer[y as usize] = [0u8; Console::Columns];
+        }
+        for x in 0..self.cursor_column {
+            self.buffer[self.cursor_row as usize][x as usize] = 0;
+        }
+        self.cursor_column = 0;
+        self.cursor_row = 0;
+    }
 
     fn newline(&mut self) {
         self.cursor_column = 0;
         if (self.cursor_row as usize) < Console::Rows - 1 {
             self.cursor_row += 1
         } else {
-            for row in 0..self.cursor_row as usize {
-                for column in 0..(Console::Columns + 1) {
-                    if self.buffer[row][column] == 0 && self.buffer[row + 1][column] == 0 {
-                        break;
+            match WINDOW_WRITER.get() {
+                Some(writer) => {
+                    writer.lock().move_(0, -16);
+                }
+                None => {
+                    for row in 0..self.cursor_row as usize {
+                        for column in 0..Console::Columns {
+                            if self.buffer[row][column] == 0 && self.buffer[row + 1][column] == 0 {
+                                break;
+                            }
+                            let c = self.buffer[row + 1][column];
+                            self.buffer[row][column] = c;
+                            write_ascii(
+                                8 * column as u64,
+                                16 * row as u64,
+                                c,
+                                self.fg_color,
+                                self.bg_color,
+                                &mut get_graphic().lock(),
+                            )
+                        }
                     }
-                    let c = self.buffer[row + 1][column];
-                    self.buffer[row][column] = c;
-                    write_ascii(
-                        8 * column as u64,
-                        16 * row as u64,
-                        c,
-                        self.fg_color,
-                        self.bg_color,
-                    );
                 }
             }
-            for column in 0..(Console::Columns + 1) {
+
+            for column in 0..Console::Columns {
                 self.buffer[Console::Rows - 1][column] = 0;
-                write_ascii(
-                    8 * column as u64,
-                    16 * self.cursor_row as u64,
-                    b' ',
-                    self.fg_color,
-                    self.bg_color,
-                );
+                match WINDOW_WRITER.get() {
+                    Some(writer) => write_ascii(
+                        8 * column as u64,
+                        16 * self.cursor_row,
+                        b' ',
+                        self.fg_color,
+                        self.bg_color,
+                        &mut writer.lock(),
+                    ),
+                    None => write_ascii(
+                        8 * column as u64,
+                        16 * self.cursor_row,
+                        b' ',
+                        self.fg_color,
+                        self.bg_color,
+                        &mut get_graphic().lock(),
+                    ),
+                }
             }
         }
     }
@@ -111,6 +153,11 @@ impl fmt::Write for Console {
 pub fn init_console(bg_color: PixelColor, fg_color: PixelColor) {
     CONSOLE.get_or_init(|| Mark::new(Mutex::new(Console::new(bg_color, fg_color))));
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug));
+}
+
+pub fn alloc_window(writer: WindowFrame) {
+    WINDOW_WRITER.get_or_init(|| Mutex::new(writer));
+    CONSOLE.skip().lock().cls();
 }
 
 #[macro_export]
@@ -135,11 +182,16 @@ impl Log for ConsoleLogger {
         }
     }
 
-    fn flush(&self) {}
+    fn flush(&self) {
+        CONSOLE.skip().lock().cls();
+    }
 }
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
     CONSOLE.skip().lock().write_fmt(args).unwrap();
+    if WINDOW_WRITER.get().is_some() {
+        render();
+    }
 }

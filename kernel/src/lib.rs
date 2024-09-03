@@ -28,6 +28,7 @@ mod queue;
 mod sync;
 pub mod task;
 pub mod timer;
+pub mod utility;
 pub mod window;
 
 use core::panic::PanicInfo;

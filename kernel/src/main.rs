@@ -6,6 +6,9 @@ extern crate alloc;
 use alloc::vec;
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use core::{arch::asm, iter::empty, ptr::read_volatile, str};
+use kernel::console::alloc_window;
+use kernel::window::frame::WindowFrame;
+use kernel::window::{init_window, new_layer, new_layer_pos, render};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -50,7 +53,7 @@ entry_point!(kernel_main);
 
 fn kernel_main(boot_info: BootInfo) {
     set_interrupt(false);
-    let (height, width) = boot_info.frame_config.resolution();
+    let (width, height) = boot_info.frame_config.resolution();
 
     init_graphic(boot_info.frame_config);
     get_graphic().lock().clean();
@@ -71,7 +74,13 @@ fn kernel_main(boot_info: BootInfo) {
     init_heap(&boot_info.memory_map);
     info!("Heap Initialized");
 
+    init_window((width, height));
+    let writer = WindowFrame::new_pos(0, 18, 640, 400, "Console");
+    alloc_window(writer);
+    info!("Window Manager Initialized");
+
     init_task();
+    // create_task(TaskFlags::new(), None, task_render as u64, 0, 0);
     info!("Task Management Initialized");
 
     init_fs();
@@ -121,7 +130,7 @@ fn kernel_main(boot_info: BootInfo) {
     info!("PCI Init Started");
     init_pci();
 
-    create_task(TaskFlags::new(), None, test as u64, 0, 0);
+    // create_task(TaskFlags::new(), None, test as u64, 0, 0);
 
     let mut msi_vector: Vec<MSIEntry> = Vec::new();
     match PciSearcher::new()
@@ -221,7 +230,7 @@ fn kernel_main(boot_info: BootInfo) {
             for (idx, dev_name) in dev_list().iter().enumerate() {
                 info!("[{idx}] {dev_name}");
             }
-            create_task(TaskFlags::new(), None, test_fs as u64, 0, 0);
+            // create_task(TaskFlags::new(), None, test_fs as u64, 0, 0);
         }
         None => {}
     }
@@ -230,14 +239,19 @@ fn kernel_main(boot_info: BootInfo) {
 }
 
 fn print_input() {
+    let mut count = 0usize;
     loop {
         print!("{}", getch() as char);
+        count = count.wrapping_add(1);
+        // if count % 10 == 0 {
+        //     WindowFrame::new(200, 200, "Test");
+        // }
     }
 }
 
-fn test_print() {
-    for _ in 0..3000 {
-        print!("a");
+fn task_render() {
+    loop {
+        render();
     }
 }
 
@@ -448,15 +462,15 @@ fn test_fpu() {
 
 fn test_thread() {
     let id = running_task().unwrap().id() + 1;
+
     let mut random = id;
     let mut value1 = 1f64;
     let mut value2 = 1f64;
 
     let data = [b'-', b'\\', b'|', b'/'];
-    let offset = id * 2;
-    let offset_x = id % 80 + 80;
-    let offset_y = id / 80 + 25;
     let mut count = 0;
+
+    let mut writer = new_layer(8, 16);
 
     loop {
         random = random * 1103515245 + 12345;
@@ -478,21 +492,17 @@ fn test_thread() {
         }
 
         write_ascii(
-            offset_x * 8,
-            offset_y * 16,
+            0,
+            0,
             data[count],
             PixelColor::Red,
             PixelColor::Black,
+            &mut writer,
         );
+        // render();
         count = (count + 1) % 4;
     }
-    write_ascii(
-        offset_x * 8,
-        offset_y * 16,
-        b' ',
-        PixelColor::Red,
-        PixelColor::White,
-    );
+    write_ascii(0, 0, b' ', PixelColor::Red, PixelColor::White, &mut writer);
     info!("Thread id={id}: FPU Test Failed -> left={value1}, right={value2}");
 }
 
@@ -511,6 +521,7 @@ fn test_windmill() {
             data[count],
             PixelColor::Red,
             PixelColor::Black,
+            &mut get_graphic().lock(),
         );
         count = (count + 1) % 4;
     }

@@ -135,17 +135,17 @@ impl FAT32 {
         let fat_size = header.fat_size;
         let root_directory_cluster = header.root_directory_clustor;
 
-        debug!("Jmp Boot Code  : {:0X?}", header.common.jmp_boot_code);
-        debug!(
-            "Name String    : {}",
-            AsciiStr::from_ascii(&header.common.oem_id).unwrap()
-        );
-        debug!("Byte/Sector    : {byte_per_sector}");
-        debug!("Sector/Cluster : {sector_per_cluster}");
-        debug!("Reserved Sector: {reserved_sector_count:#X}");
-        debug!("Total Sector   : {total_sector:#X}");
-        debug!("FAT Size       : {fat_size:#X}");
-        debug!("Root Cluster   : {root_directory_cluster:#X}");
+        // debug!("Jmp Boot Code  : {:0X?}", header.common.jmp_boot_code);
+        // debug!(
+        //     "Name String    : {}",
+        //     AsciiStr::from_ascii(&header.common.oem_id).unwrap()
+        // );
+        // debug!("Byte/Sector    : {byte_per_sector}");
+        // debug!("Sector/Cluster : {sector_per_cluster}");
+        // debug!("Reserved Sector: {reserved_sector_count:#X}");
+        // debug!("Total Sector   : {total_sector:#X}");
+        // debug!("FAT Size       : {fat_size:#X}");
+        // debug!("Root Cluster   : {root_directory_cluster:#X}");
 
         device.read(start_addr + 1, &mut buffer).map_err(|err| ())?;
         let fs_info = buffer[0].convert::<FsInfo>();
@@ -415,7 +415,7 @@ impl FAT32 {
             let sector_offset = idx % entry_per_sector;
             let entry = buffer[sector as usize].get::<DirectoryEntry>(sector_offset as usize);
             if entry.start_cluster_idx() == 0 {
-                debug!("entry_idx={idx}");
+                // debug!("entry_idx={idx}");
                 return Ok(idx);
             }
         }
@@ -454,7 +454,7 @@ impl FAT32 {
         let sector_offset = dir_offset % entry_per_sector;
         self.read_cluster(device, self.data_addr + offset, &mut buffer)
             .map_err(|err| ())?;
-        debug!("[FAT] dir_idx={dir_offset:X}, sector={sector:X}");
+        // debug!("[FAT] dir_idx={dir_offset:X}, sector={sector:X}");
         *buffer[sector as usize].get_mut(sector_offset as usize) = *data;
         self.write_cluster(device, self.data_addr + offset, &buffer)
             .map_err(|err| ())?;
@@ -483,10 +483,10 @@ impl FileSystem for FAT32 {
                 *c = *char;
             }
         }
-        debug!("Start Data Cluster={data_cluster:#X}");
+        // debug!("Start Data Cluster={data_cluster:#X}");
         dir_entry.attr = FAT_DIR_ATTRIBUTE_FILE;
         dir_entry.set_start_cluster_idx(data_cluster);
-        debug!("[FAT] entry_idx={dir_entry_idx:#X}");
+        // debug!("[FAT] entry_idx={dir_entry_idx:#X}");
         self.set_dir_entry(device, dir.file_start_idx, dir_entry_idx, &dir_entry)?;
 
         Ok(FileDescriptor {
@@ -517,7 +517,7 @@ impl FileSystem for FAT32 {
                     return Err(());
                 }
                 let file_start_idx = entry.start_cluster_idx();
-                debug!("Start Data Cluster={file_start_idx:#X}");
+                // debug!("Start Data Cluster={file_start_idx:#X}");
                 return Ok(FileDescriptor {
                     file_start_idx,
                     file_current_idx: file_start_idx,
@@ -538,7 +538,7 @@ impl FileSystem for FAT32 {
 
         while data_cluster != FAT_END_OF_CLUSTER {
             let next_data_cluster = self.get_cluster_ptr(device, data_cluster)?;
-            debug!("remove: {data_cluster:#X} -> {next_data_cluster:#X}");
+            // debug!("remove: {data_cluster:#X} -> {next_data_cluster:#X}");
             self.set_cluster_ptr(device, data_cluster, 0)?;
             data_cluster = next_data_cluster;
         }
@@ -763,7 +763,7 @@ impl FileSystem for FAT32 {
             data_cluster = self.get_cluster_ptr(device, data_cluster)?;
             while data_cluster != FAT_END_OF_CLUSTER {
                 let next_data_cluster = self.get_cluster_ptr(device, data_cluster)?;
-                debug!("{data_cluster:#X} -> {next_data_cluster:#X}");
+                // debug!("{data_cluster:#X} -> {next_data_cluster:#X}");
                 self.set_cluster_ptr(device, data_cluster, 0)?;
                 data_cluster = next_data_cluster;
             }

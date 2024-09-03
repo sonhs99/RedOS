@@ -109,7 +109,9 @@ impl<N: Node> ListQueue<N> {
     }
 
     pub fn remove(&mut self, mut node: NonNull<N>) {
-        self.length -= 1;
+        if self.length != 0 {
+            self.length -= 1;
+        }
         unsafe {
             let mut next_node = node.as_mut().next();
             let mut prev_node = node.as_mut().prev();
