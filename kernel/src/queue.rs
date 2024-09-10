@@ -1,5 +1,8 @@
 use core::ptr::NonNull;
 
+use alloc::vec;
+use alloc::vec::Vec;
+
 pub struct ArrayQueue<T, const N: usize> {
     buffer: [T; N],
     put_idx: usize,
@@ -41,6 +44,51 @@ impl<T: Clone + Copy, const N: usize> ArrayQueue<T, N> {
         }
         let value = self.buffer[self.get_idx];
         self.get_idx = (self.get_idx + 1) % N;
+        Ok(value)
+    }
+}
+
+pub struct VecQueue<T> {
+    buffer: Vec<T>,
+    put_idx: usize,
+    get_idx: usize,
+    last_op: bool,
+}
+
+impl<T: Copy> VecQueue<T> {
+    pub fn new(init_value: T, size: usize) -> Self {
+        Self {
+            buffer: vec![init_value; size],
+            put_idx: 0,
+            get_idx: 0,
+            last_op: false,
+        }
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.put_idx == self.get_idx && !self.last_op
+    }
+
+    pub const fn is_full(&self) -> bool {
+        self.put_idx == self.get_idx && self.last_op
+    }
+
+    pub fn enqueue(&mut self, value: T) -> Result<(), ()> {
+        if self.is_full() {
+            return Err(());
+        }
+        self.buffer[self.put_idx] = value;
+        self.put_idx = (self.put_idx + 1) % self.buffer.len();
+
+        Ok(())
+    }
+
+    pub fn dequeue(&mut self) -> Result<T, ()> {
+        if self.is_empty() {
+            return Err(());
+        }
+        let value = self.buffer[self.get_idx];
+        self.get_idx = (self.get_idx + 1) % self.buffer.len();
         Ok(value)
     }
 }

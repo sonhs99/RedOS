@@ -8,7 +8,7 @@ use crate::interrupt::apic::APICTimerMode;
 use crate::interrupt::{load_idt, set_interrupt, InterruptVector};
 use crate::sync::{Mutex, OnceLock};
 use crate::task::idle::idle_task;
-use crate::task::{init_task, init_task_ap};
+use crate::task::init_task;
 use crate::timer::sleep;
 use crate::{
     gdt,

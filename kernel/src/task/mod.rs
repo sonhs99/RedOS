@@ -493,27 +493,6 @@ pub fn init_task() {
         task.flags = *TaskFlags::new().set_priority(0);
         task.affinity = Some(apic_id as u8);
     }
-
-    create_task(
-        TaskFlags::new().set_priority(0xFF).clone(),
-        Some(apic_id as u8),
-        idle::idle_task as u64,
-        0,
-        0,
-    );
-}
-
-pub fn init_task_ap() {
-    let apic_id = LocalAPICRegisters::default().local_apic_id().id() as usize;
-    {
-        let mut manager = TASK_MANAGER.lock();
-        SCHEDULER[apic_id as usize]
-            .get_or_init(|| Mark::new(Mutex::new(PriorityRoundRobinScheduler::new())));
-        let task = manager.allocate().unwrap();
-        SCHEDULER[apic_id].skip().lock().set_running_task(task);
-        task.flags = *TaskFlags::new().set_priority(0xFF);
-        task.affinity = Some(apic_id as u8);
-    }
 }
 
 pub fn create_task(

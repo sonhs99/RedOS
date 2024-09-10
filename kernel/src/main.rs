@@ -7,8 +7,10 @@ use alloc::vec;
 use alloc::{boxed::Box, format, string::String, vec::Vec};
 use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 use kernel::console::alloc_window;
+use kernel::device::driver::mouse::{get_mouse_state, Mouse};
+use kernel::task::idle::idle_task;
 use kernel::window::frame::WindowFrame;
-use kernel::window::{init_window, new_layer, new_layer_pos, render};
+use kernel::window::{create_window, init_window, render, window_task};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -75,12 +77,12 @@ fn kernel_main(boot_info: BootInfo) {
     info!("Heap Initialized");
 
     init_window((width, height));
-    let writer = WindowFrame::new_pos(0, 18, 640, 400, "Console");
+    let writer = WindowFrame::new_pos(0, 19, 640, 400, "Log");
     alloc_window(writer);
     info!("Window Manager Initialized");
 
     init_task();
-    // create_task(TaskFlags::new(), None, task_render as u64, 0, 0);
+    create_task(TaskFlags::new(), None, window_task as u64, 0, 0);
     info!("Task Management Initialized");
 
     init_fs();
@@ -179,13 +181,17 @@ fn kernel_main(boot_info: BootInfo) {
 
                 let mut allocator = Allocator::new();
                 let keyboard = Keyboard::new();
-                let mut xhc: xhc::Controller<register::External, Allocator> =
-                    xhc::Controller::new(xhc_mmio_base, allocator, vec![Box::new(keyboard.usb())])
-                        .unwrap();
+                let mouse = Mouse::new();
+                let mut xhc: xhc::Controller<register::External, Allocator> = xhc::Controller::new(
+                    xhc_mmio_base,
+                    allocator,
+                    vec![Box::new(keyboard.usb()), Box::new(mouse.usb())],
+                )
+                .unwrap();
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
-            create_task(TaskFlags::new(), None, print_input as u64, 0, 0);
+            // create_task(TaskFlags::new(), None, print_input as u64, 0, 0);
         }
         None => {}
     }
@@ -236,6 +242,7 @@ fn kernel_main(boot_info: BootInfo) {
     }
 
     init_routing_table(msi_vector);
+    idle_task();
 }
 
 fn print_input() {
@@ -246,12 +253,6 @@ fn print_input() {
         // if count % 10 == 0 {
         //     WindowFrame::new(200, 200, "Test");
         // }
-    }
-}
-
-fn task_render() {
-    loop {
-        render();
     }
 }
 
@@ -470,7 +471,7 @@ fn test_thread() {
     let data = [b'-', b'\\', b'|', b'/'];
     let mut count = 0;
 
-    let mut writer = new_layer(8, 16);
+    let mut writer = create_window(8, 16);
 
     loop {
         random = random * 1103515245 + 12345;

@@ -213,14 +213,14 @@ const KEY_MAPPING_TABLE: [KeyMappingEntry; 103] = [
 ];
 
 trait KeyboardSubscriber {
-    fn subsrcribe(&self, modified_bit: u8, keycode: Key);
+    fn subscribe(&self, modified_bit: u8, keycode: Key);
 }
 
 impl<F> KeyboardSubscriber for F
 where
     F: Fn(u8, Key),
 {
-    fn subsrcribe(&self, modified_bit: u8, keycode: Key) {
+    fn subscribe(&self, modified_bit: u8, keycode: Key) {
         self(modified_bit, keycode)
     }
 }
@@ -280,7 +280,7 @@ impl ClassDriverOperate for USBKeyboardDriver {
     fn on_data_received(&mut self) -> Result<(), ()> {
         for key in self.keycodes().iter() {
             self.manager.update_key_status(key);
-            self.subsrcribe.subsrcribe(self.data_buff[0], *key);
+            self.subsrcribe.subscribe(self.data_buff[0], *key);
         }
         Ok(())
     }

@@ -4,7 +4,7 @@ use usb::USBKeyboardDriver;
 
 use crate::{interrupt::without_interrupts, print, queue::ArrayQueue, sync::Mutex, task::schedule};
 
-mod keycode;
+pub mod keycode;
 mod manager;
 mod usb;
 
@@ -25,6 +25,10 @@ impl Keyboard {
             QUEUE.lock().enqueue(key);
         })
     }
+}
+
+pub fn get_keystate_unblocked() -> Option<Key> {
+    QUEUE.lock().dequeue().ok()
 }
 
 pub fn get_code() -> Key {

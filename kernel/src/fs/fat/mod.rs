@@ -106,7 +106,7 @@ impl DirectoryEntry {
 
 pub fn fat_type(vbr: &Block<512>) -> FATType {
     let header = vbr.convert::<CommonFATHeader>();
-    unsafe { debug!("size16={}", read_unaligned(addr_of!(header.fat_size16))) };
+    // unsafe { debug!("size16={}", read_unaligned(addr_of!(header.fat_size16))) };
     if header.fat_size16 != 0 {
         FATType::FAT16
     } else {

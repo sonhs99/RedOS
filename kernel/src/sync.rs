@@ -46,7 +46,7 @@ pub struct MarkGuard<'a, T> {
 }
 
 impl<T> Mark<T> {
-    pub fn new(inner: T) -> Self {
+    pub const fn new(inner: T) -> Self {
         Self {
             inner: UnsafeCell::new(inner),
             id: UnsafeCell::new(0xFF),
@@ -119,6 +119,9 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 
 unsafe impl<T> Send for OnceLock<T> {}
 unsafe impl<T> Sync for OnceLock<T> {}
+
+unsafe impl<T: Send + Sync> Send for Mark<T> {}
+unsafe impl<T: Send + Sync> Sync for Mark<T> {}
 
 impl<T> Mutex<T> {
     pub const fn new(inner: T) -> Self {
