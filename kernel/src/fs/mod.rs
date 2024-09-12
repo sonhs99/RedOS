@@ -6,7 +6,8 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use fat::FAT32;
+
+use fat::{FAT16, FAT32};
 use hashbrown::HashMap;
 use log::debug;
 
@@ -155,23 +156,30 @@ impl RootFS {
         let mut file_systems: Vec<Box<dyn FileSystem>> = Vec::with_capacity(4);
         for part_idx in 0..4 {
             let partition = mbr.partition(part_idx);
-            // debug!("{partition:#0X?}");
-            if partition.type_() != 0 {
-                let start_addr = partition.start_address();
-                let volume_size = partition.size();
-                let mut vbr: Vec<Block<512>> = vec![Block::empty()];
-                device.read(0, &mut vbr).map_err(|err| ())?;
-                match fat::fat_type(&vbr[0]) {
-                    fat::FATType::FAT32 => {
-                        if let Ok(fs) =
-                            FAT32::mount(&mut device, start_addr, volume_size, use_cache)
-                        {
-                            file_systems.push(Box::new(fs));
-                            count += 1;
-                        }
+            match partition.type_() {
+                0x06 | 0x0E => {
+                    // FAT16
+                    // debug!("{partition:#0X?}");
+
+                    let start_addr = partition.start_address();
+                    let volume_size = partition.size();
+                    if let Ok(fs) = FAT16::mount(&mut device, start_addr, volume_size, use_cache) {
+                        file_systems.push(Box::new(fs));
+                        count += 1;
                     }
-                    _ => {}
                 }
+                0x0B | 0x0C => {
+                    // FAT32
+                    // debug!("{partition:#0X?}");
+
+                    let start_addr = partition.start_address();
+                    let volume_size = partition.size();
+                    if let Ok(fs) = FAT32::mount(&mut device, start_addr, volume_size, use_cache) {
+                        file_systems.push(Box::new(fs));
+                        count += 1;
+                    }
+                }
+                _ => continue,
             }
         }
         self.tree.insert(
@@ -203,9 +211,10 @@ impl RootFS {
 
         let mbr = buffer.mbr_mut();
         let mut partition = mbr.partition(0);
+        partition.set_bootable();
         partition.set_size(size);
         partition.set_start_address(start_address);
-        partition.set_type_(0x80);
+        partition.set_type_(0x0C);
         mbr.set_partition(0, partition);
         entry.device.write(0, slice::from_ref(&buffer));
 

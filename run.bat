@@ -1,1 +1,1 @@
-qemu-system-x86_64 -m 512M -smp 1 -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd -drive format=raw,file=fat:rw:esp -hdb hdd.img -device qemu-xhci -device usb-kbd -device usb-mouse -monitor stdio
+qemu-system-x86_64 -m 512M -smp 8 -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd -drive if=pflash,format=raw,readonly=on,file=OVMF_VARS.fd -drive format=raw,file=fat:rw::esp -device qemu-xhci -device usb-kbd -device usb-mouse -monitor stdio

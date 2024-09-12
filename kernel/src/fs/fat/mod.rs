@@ -10,12 +10,13 @@ use crate::device::block::{Block, BlockIO};
 
 // in progress
 // pub mod fat16;
+pub mod fat16;
 pub mod fat32;
 
+pub use fat16::FAT16;
 pub use fat32::FAT32;
 
 pub const FAT_SECTOR_PER_CLUSTER: u8 = 8;
-pub const FAT_SECTOR_PER_CLUSTER_ENTRY: u32 = 512 / 4;
 pub const FAT_MAX_DIRECTORY_ENTRY_COUNT: u32 = 128;
 
 pub const FAT_END_OF_CLUSTER: u32 = 0x0FFF_FFFF;
@@ -101,15 +102,5 @@ impl DirectoryEntry {
     pub fn set_start_cluster_idx(&mut self, cluster_addr: u32) {
         self.cluster_low = cluster_addr as u16;
         self.cluster_high = (cluster_addr >> 16) as u16;
-    }
-}
-
-pub fn fat_type(vbr: &Block<512>) -> FATType {
-    let header = vbr.convert::<CommonFATHeader>();
-    // unsafe { debug!("size16={}", read_unaligned(addr_of!(header.fat_size16))) };
-    if header.fat_size16 != 0 {
-        FATType::FAT16
-    } else {
-        FATType::FAT32
     }
 }

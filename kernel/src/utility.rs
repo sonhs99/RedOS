@@ -1,3 +1,5 @@
+use core::ops::{Add, Div, Sub};
+
 static mut RANDOM_VALUE: u64 = 0;
 
 pub fn seed(sd: u64) {
@@ -10,6 +12,10 @@ pub fn random() -> u64 {
         RANDOM_VALUE = (RANDOM_VALUE.wrapping_add(5571031)) >> 16;
         RANDOM_VALUE
     }
+}
+
+pub fn ceil(value: u32, divider: u32) -> u32 {
+    (value + divider - 1) / divider
 }
 
 pub fn abs(value: isize) -> usize {

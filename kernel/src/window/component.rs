@@ -62,7 +62,7 @@ impl Drawable for Rectangle {
         let border_hor = vec![self.border_color.as_u32(); width_len];
         let bg = vec![self.background_color.as_u32(); width_len - self.border * 2];
         let border_ver = vec![self.border_color.as_u32(); self.border];
-        for idx_y in 0..height_len {
+        for idx_y in 0..=height_len {
             if idx_y < self.border || idx_y > height_len - self.border {
                 writer.write_buf(offset_x, offset_y + idx_y, &border_hor);
             } else {
@@ -84,17 +84,24 @@ impl Drawable for Rectangle {
 //     border: usize,
 // }
 
-pub fn write_str(offset: usize, str: &str, writer: &mut impl Writable) {
+pub fn write_str(
+    offset_x: usize,
+    offset_y: usize,
+    str: &str,
+    foreground: PixelColor,
+    background: PixelColor,
+    writer: &mut impl Writable,
+) {
     let mut x = 0usize;
-    let mut y = offset;
+    let mut y = 0usize;
     for (idx, c) in str.bytes().enumerate() {
         if c >= 0x20 && c <= 0x7F {
             write_ascii(
-                x as u64 * 8,
-                y as u64 * 16,
+                (x * 8 + offset_x) as u64,
+                (y * 16 + offset_y) as u64,
                 c,
-                PixelColor::Black,
-                PixelColor::White,
+                foreground,
+                background,
                 writer,
             );
             x += 1;

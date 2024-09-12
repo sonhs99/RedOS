@@ -9,8 +9,10 @@ use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 use kernel::console::alloc_window;
 use kernel::device::driver::mouse::{get_mouse_state, Mouse};
 use kernel::task::idle::idle_task;
+use kernel::window::component::{write_str, Rectangle};
+use kernel::window::event::{EventType, WindowEvent};
 use kernel::window::frame::WindowFrame;
-use kernel::window::{create_window, init_window, render, window_task};
+use kernel::window::{create_window, init_window, window_task, Drawable};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -210,7 +212,7 @@ fn kernel_main(boot_info: BootInfo) {
                 ide_dev.bus, ide_dev.dev, ide_dev.func
             );
             init_pata();
-            for i in 1..4 {
+            for i in 0..4 {
                 if let Ok(hdd) = get_device(i) {
                     info!("PATA:{i} Detected");
                     // // create_task(TaskFlags::new(), test_hdd as u64, 0, 0);
@@ -227,6 +229,15 @@ fn kernel_main(boot_info: BootInfo) {
                                 info!("PATA:{i} formated");
                             }
                         }
+
+                        let root = open_dir(&dev_name, 0, "/", b"r")
+                            .expect("Attempt to Open Root Directory Failed");
+                        let mut count = 0;
+                        for (idx, entry) in root.entries() {
+                            info!("[{idx}] /{entry}");
+                            count += 1;
+                        }
+                        info!("Total {count} entries");
                     }
                 } else {
                     info!("PATA:{i} Not Detected");
@@ -242,6 +253,7 @@ fn kernel_main(boot_info: BootInfo) {
     }
 
     init_routing_table(msi_vector);
+    create_task(TaskFlags::new(), None, test_window as u64, 0, 0);
     idle_task();
 }
 
@@ -295,6 +307,86 @@ fn test_hdd() {
     //     }
     //     println!();
     // }
+}
+
+fn test_window() {
+    let width = 500;
+    let height = 200;
+    let mut writer = WindowFrame::new(width, height, "Hello, World!");
+    let mut info = writer.info();
+    let id = writer.window_id();
+    let rect = Rectangle::new(
+        width - 20,
+        70,
+        2,
+        0,
+        PixelColor::White,
+        PixelColor::Black,
+        PixelColor::White,
+    );
+    rect.draw(10, 8, &rect.outside_pos(10, 8), &mut info);
+    write_str(
+        20,
+        4,
+        &format!("GUI Information Window[Window ID: {id:#08X}]"),
+        PixelColor::Black,
+        PixelColor::White,
+        &mut info,
+    );
+
+    write_str(
+        16,
+        24,
+        "Mouse Event:",
+        PixelColor::Black,
+        PixelColor::White,
+        &mut info,
+    );
+    write_str(
+        16,
+        40,
+        "Data: X = 0, Y = 0",
+        PixelColor::Black,
+        PixelColor::White,
+        &mut info,
+    );
+
+    loop {
+        if let Some(event) = writer.pop_event() {
+            match event.event() {
+                EventType::Mouse(e, x, y) => {
+                    let str = match e {
+                        kernel::window::event::MouseEvent::Move => "Move",
+                        kernel::window::event::MouseEvent::Pressed(_) => "Pressed",
+                        kernel::window::event::MouseEvent::Released(_) => "Released",
+                    };
+                    write_str(
+                        16,
+                        24,
+                        &format!("Mouse Event: {str:10}"),
+                        PixelColor::Black,
+                        PixelColor::White,
+                        &mut info,
+                    );
+                    write_str(
+                        16,
+                        40,
+                        &format!("Data: X = {x:3}, Y = {y:3}"),
+                        PixelColor::Black,
+                        PixelColor::White,
+                        &mut info,
+                    );
+                }
+                EventType::Window(e) => {
+                    if let WindowEvent::Close = e {
+                        writer.close();
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn test_hdd_rw() {

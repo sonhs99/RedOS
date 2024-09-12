@@ -156,7 +156,7 @@ pub trait Movable {
 }
 
 #[derive(Clone, Copy)]
-struct Area {
+pub struct Area {
     x: usize,
     y: usize,
     width: usize,
@@ -372,7 +372,11 @@ pub struct WindowWriter(Arc<Mutex<Window>>);
 
 impl WindowWriter {
     pub fn close(&self) {
-        WINDOW_MANAGER.lock().remove(self.0.lock().id);
+        let mut manager = WINDOW_MANAGER.lock();
+        let id = self.0.lock().id;
+        let area = manager.get_layer(id).area();
+        manager.remove(id);
+        manager.render(&area, &mut get_graphic().lock());
     }
 
     pub fn set_title(&self, area: Area) {
@@ -547,11 +551,13 @@ impl<T: Writable> Writable for PartialWriter<T> {
 
     fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
         if offset_x < self.area.x + self.area.width && offset_y < self.area.y + self.area.height {
-            self.writer.write_buf(
-                offset_x + self.area.x,
-                offset_y + self.area.y,
-                &buffer[..(self.area.width - offset_x)],
-            );
+            let buf = if self.area.width - offset_x > buffer.len() {
+                buffer
+            } else {
+                &buffer[..(self.area.width - offset_x)]
+            };
+            self.writer
+                .write_buf(offset_x + self.area.x, offset_y + self.area.y, buf);
         }
     }
 }
@@ -672,6 +678,7 @@ impl WindowManager {
         self.layers
             .insert(id, Layer::new(id, x, y, width, height, relocatable));
         self.stack.push(id);
+        self.get_layer(id).window.lock().need_update();
         self.layers.get_mut(&id).expect("Not Found")
     }
 
@@ -933,6 +940,7 @@ fn process_mouse() {
                     false
                 };
                 if !changed {
+                    debug!("id={window_id} Pressed");
                     is_button_changed = true;
 
                     writer.push_event(Event::new(
@@ -949,6 +957,7 @@ fn process_mouse() {
                     }
                 }
                 is_button_changed = true;
+                debug!("id={window_id} Released");
                 writer.push_event(Event::new(
                     DestId::One(window_id),
                     EventType::Mouse(event::MouseEvent::Released(button), local_x, local_y),
@@ -984,34 +993,8 @@ fn process_keyboard() {
 }
 
 pub fn window_task() {
-    let mut windows: Vec<WindowFrame> = Vec::new();
-    let mut background = WINDOW_MANAGER.lock().get_layer(0).writer();
     loop {
         process_mouse();
         process_keyboard();
-
-        if let Some(event) = background.pop_event() {
-            match event.event() {
-                EventType::Mouse(mouse, x, y) => match mouse {
-                    MouseEvent::Pressed(button) => {
-                        if button == 0 {
-                            let window = WindowFrame::new(200, 200, "test");
-                            let mut info = window.info();
-                            write_str(0, "Hello, world!", &mut info);
-                            write_str(1, "Nice to meet you!", &mut info);
-                            windows.push(window);
-                            render();
-                        } else if button == 1 {
-                            while let Some(window) = windows.pop() {
-                                window.close();
-                            }
-                            render();
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
     }
 }

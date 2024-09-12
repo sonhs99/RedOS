@@ -4,8 +4,9 @@ use crate::{font::write_ascii, graphic::PixelColor};
 
 use super::{
     component::{write_str, Rectangle},
-    create_window, create_window_pos, Area, Drawable, Movable, PartialWriter, WindowWriter,
-    Writable,
+    create_window, create_window_pos,
+    event::Event,
+    Area, Drawable, Movable, PartialWriter, WindowWriter, Writable,
 };
 
 const CLOSE_BUTTON_IMG: [[u8; 8]; 4] = [
@@ -134,7 +135,14 @@ impl WindowFrame {
                 }
             }
         }
-        write_str(0, name, &mut title_writer);
+        write_str(
+            0,
+            0,
+            name,
+            PixelColor::Black,
+            PixelColor::White,
+            &mut title_writer,
+        );
         writer.set_button(close_btn.outside_pos(width - 17, 2));
         writer.set_title(title.outside_pos(1, 1));
         Self {
@@ -156,6 +164,14 @@ impl WindowFrame {
 
     pub fn info(&self) -> PartialWriter<WindowWriter> {
         PartialWriter::new(self.writer.clone(), self.info.inside_pos(1, 19))
+    }
+
+    pub fn pop_event(&self) -> Option<Event> {
+        self.writer.pop_event()
+    }
+
+    pub fn window_id(&self) -> usize {
+        self.writer.0.lock().id
     }
 }
 

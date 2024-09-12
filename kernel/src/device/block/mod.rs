@@ -92,6 +92,10 @@ impl MBRPartionEntry {
         self.type_
     }
 
+    pub fn set_bootable(&mut self) {
+        self.status = 0x80;
+    }
+
     pub fn set_start_address(&mut self, start_addr: u32) -> &mut Self {
         unsafe { write_unaligned(addr_of_mut!(self.start_lba), start_addr) };
         self

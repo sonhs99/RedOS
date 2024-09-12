@@ -2,6 +2,7 @@ use core::slice;
 use core::str;
 
 use alloc::borrow::ToOwned;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::{boxed::Box, vec::Vec};
@@ -18,48 +19,32 @@ use super::{
     FAT_MAX_DIRECTORY_ENTRY_COUNT, FAT_SECTOR_PER_CLUSTER,
 };
 
-const FAT32_RESERVED_SECTOR_COUNT: u32 = 32;
-const FAT32_ROOT_DIRECTORY_CLUSTER: u32 = 2;
-const FAT32_CACHE_SIZE: usize = 128;
-const FAT32_CLUSTER_ENTRY_PER_SECTOR: u32 = 512 / 4;
+const FAT16_RESERVED_SECTOR_COUNT: u32 = 1;
+const FAT16_CACHE_SIZE: usize = 128;
+const FAT16_CLUSTER_ENTRY_PER_SECTOR: u32 = 512 / 2;
+const FAT16_END_OF_CLUSTER: u32 = 0xFFF8;
 
 #[repr(C, packed)]
-struct FAT32Header {
+struct FAT16Header {
     common: CommonFATHeader,
-    fat_size: u32,
-    ext_flags: u16,
-    fs_version: u16,
-    root_directory_clustor: u32,
-    fs_info: u16,
-    boot_record_backup: u16,
-    _reserved1: [u32; 3],
-    drive_num: u8,
-    _reserved2: u8,
+    drive_number: u8,
+    _reserved1: u8,
     boot_signature: u8,
-    volume_id: [u8; 4],
+    serial_number: u32,
     volume_label: [u8; 11],
-    fs_type: [u8; 8],
-    _reserved3: [u8; 422],
+    _reserved2: [u8; 458],
 }
 
-impl FAT32Header {
+impl FAT16Header {
     pub const fn empty() -> Self {
         Self {
             common: CommonFATHeader::empty(),
-            fat_size: 0,
-            ext_flags: 0,
-            fs_version: 0,
-            root_directory_clustor: 0,
-            fs_info: 0,
-            boot_record_backup: 0,
-            _reserved1: [0; 3],
-            drive_num: 0,
-            _reserved2: 0,
-            boot_signature: 0,
-            volume_id: [0; 4],
-            volume_label: [0; 11],
-            fs_type: [0; 8],
-            _reserved3: [0; 422],
+            drive_number: 0x80,
+            _reserved1: 0u8,
+            boot_signature: 0u8,
+            serial_number: 0u32,
+            volume_label: [0u8; 11],
+            _reserved2: [0; 458],
         }
     }
 
@@ -67,36 +52,7 @@ impl FAT32Header {
         unsafe { &*(self as *const Self).cast::<Block<512>>() }
     }
 }
-
-#[repr(C, packed)]
-struct FsInfo {
-    lead_signature: u32,
-    _reserved1: [u8; 480],
-    struct_signature: u32,
-    free_clustor_count: u32,
-    next_free_clustor: u32,
-    _reserved2: [u8; 12],
-    trail_signature: u32,
-}
-
-impl FsInfo {
-    pub const fn empty() -> Self {
-        Self {
-            lead_signature: 0,
-            _reserved1: [0; 480],
-            struct_signature: 0,
-            free_clustor_count: 0,
-            next_free_clustor: 0,
-            _reserved2: [0; 12],
-            trail_signature: 0,
-        }
-    }
-    pub fn as_block(&self) -> &Block<512> {
-        unsafe { &*(self as *const Self).cast::<Block<512>>() }
-    }
-}
-
-pub struct FAT32 {
+pub struct FAT16 {
     start_addr: u32,
     volume_size: u32,
     reserved_sector_count: u32,
@@ -110,8 +66,7 @@ pub struct FAT32 {
 
     data_addr: u32,
 
-    free_cluster_count: u32,
-    next_free_cluster: u32,
+    current_cluster: u32,
     root_directory_cluster: u32,
 
     use_cache: bool,
@@ -119,7 +74,7 @@ pub struct FAT32 {
     cluster_cache: Cache<Block<512>>,
 }
 
-impl FAT32 {
+impl FAT16 {
     pub fn mount(
         device: &mut dyn BlockIO,
         start_addr: u32,
@@ -128,31 +83,30 @@ impl FAT32 {
     ) -> Result<Self, ()> {
         let mut buffer = vec![Block::empty()];
         device.read(start_addr, &mut buffer).map_err(|err| ())?;
-        let header = buffer[0].convert::<FAT32Header>();
+        let header = buffer[0].convert::<FAT16Header>();
         let byte_per_sector = header.common.byte_per_sector;
         let sector_per_cluster = header.common.sector_per_clustor;
         let reserved_sector_count = header.common.reserved_sector_count;
 
-        let total_sector = header.common.total_sector32;
-        let fat_size = header.fat_size;
-        let root_directory_cluster = header.root_directory_clustor;
+        let total_sector = if header.common.total_sector16 != 0 {
+            header.common.total_sector16 as u32
+        } else {
+            header.common.total_sector32
+        };
+        let fat_size = header.common.fat_size16 as u32;
+        let root_directory_cluster = 0;
 
-        debug!("Jmp Boot Code  : {:0X?}", header.common.jmp_boot_code);
-        debug!(
-            "Name String    : {}",
-            AsciiStr::from_ascii(&header.common.oem_id).unwrap()
-        );
-        debug!("Byte/Sector    : {byte_per_sector}");
-        debug!("Sector/Cluster : {sector_per_cluster}");
-        debug!("Reserved Sector: {reserved_sector_count:#X}");
-        debug!("Total Sector   : {total_sector:#X}");
-        debug!("FAT Size       : {fat_size:#X}");
-        debug!("Root Cluster   : {root_directory_cluster:#X}");
-
-        device.read(start_addr + 1, &mut buffer).map_err(|err| ())?;
-        let fs_info = buffer[0].convert::<FsInfo>();
-        let free_cluster_count = fs_info.free_clustor_count;
-        let next_free_cluster = fs_info.next_free_clustor;
+        // debug!("Jmp Boot Code  : {:0X?}", header.common.jmp_boot_code);
+        // debug!(
+        //     "Name String    : {}",
+        //     AsciiStr::from_ascii(&header.common.oem_id).unwrap()
+        // );
+        // debug!("Byte/Sector    : {byte_per_sector}");
+        // debug!("Sector/Cluster : {sector_per_cluster}");
+        // debug!("Reserved Sector: {reserved_sector_count:#X}");
+        // debug!("Total Sector   : {total_sector:#X}");
+        // debug!("FAT Size       : {fat_size:#X}");
+        // debug!("Root Cluster   : {root_directory_cluster:#X}");
 
         Ok(Self {
             start_addr,
@@ -164,12 +118,11 @@ impl FAT32 {
             fat_size,
             fat2_addr: start_addr + reserved_sector_count as u32 + fat_size,
             data_addr: start_addr + reserved_sector_count as u32 + fat_size * 2,
-            free_cluster_count,
-            next_free_cluster,
+            current_cluster: 0,
             root_directory_cluster,
             use_cache,
-            fat_cache: Cache::new(1, FAT32_CACHE_SIZE),
-            cluster_cache: Cache::new(sector_per_cluster as usize, FAT32_CACHE_SIZE),
+            fat_cache: Cache::new(1, FAT16_CACHE_SIZE),
+            cluster_cache: Cache::new(sector_per_cluster as usize, FAT16_CACHE_SIZE),
         })
     }
 
@@ -180,13 +133,13 @@ impl FAT32 {
         use_cache: bool,
     ) -> Result<Self, ()> {
         let cluster_count =
-            (volume_size - FAT32_RESERVED_SECTOR_COUNT) / FAT_SECTOR_PER_CLUSTER as u32;
-        let fat_size = ceil(cluster_count, FAT32_CLUSTER_ENTRY_PER_SECTOR);
-        let data_cluster_count = (volume_size - FAT32_RESERVED_SECTOR_COUNT - fat_size * 2)
+            (volume_size - FAT16_RESERVED_SECTOR_COUNT) / FAT_SECTOR_PER_CLUSTER as u32;
+        let fat_size = ceil(cluster_count, FAT16_CLUSTER_ENTRY_PER_SECTOR);
+        let data_cluster_count = (volume_size - FAT16_RESERVED_SECTOR_COUNT - fat_size * 2)
             / FAT_SECTOR_PER_CLUSTER as u32;
-        let fat_size = ceil(data_cluster_count, FAT32_CLUSTER_ENTRY_PER_SECTOR);
+        let fat_size = ceil(data_cluster_count, FAT16_CLUSTER_ENTRY_PER_SECTOR);
 
-        let mut header = Box::new(FAT32Header::empty());
+        let mut header = Box::new(FAT16Header::empty());
         header
             .common
             .jmp_boot_code
@@ -206,50 +159,36 @@ impl FAT32 {
         header.common.reserved_sector_count = 32;
         header.common.media_type = 0xF8;
         header.common.total_sector32 = volume_size;
-        header.root_directory_clustor = 2;
-        header.fat_size = fat_size;
+        header.common.fat_size16 = fat_size as u16;
 
         let buffer = header.as_block();
         device
             .write(start_addr, slice::from_ref(&buffer))
             .map_err(|err| ())?;
 
-        let mut fs_info = FsInfo::empty();
-
-        fs_info.free_clustor_count = data_cluster_count - 1;
-        fs_info.next_free_clustor = 3;
-
-        let buffer = fs_info.as_block();
-        device
-            .write(start_addr + 1, slice::from_ref(&buffer))
-            .map_err(|err| ())?;
-
-        let fat_addr = start_addr + FAT32_RESERVED_SECTOR_COUNT;
-        let fat2_addr = start_addr + FAT32_RESERVED_SECTOR_COUNT + fat_size;
+        let fat_addr = start_addr + FAT16_RESERVED_SECTOR_COUNT;
+        let fat2_addr = start_addr + FAT16_RESERVED_SECTOR_COUNT + fat_size;
 
         let mut fat_buffer: Vec<Block<512>> = vec![Block::empty()];
-        *fat_buffer[0].get_mut::<u32>(0) = FAT_END_OF_CLUSTER;
-        *fat_buffer[0].get_mut::<u32>(1) = FAT_END_OF_CLUSTER;
-        *fat_buffer[0].get_mut::<u32>(2) = FAT_END_OF_CLUSTER;
+        *fat_buffer[0].get_mut::<u32>(0) = FAT16_END_OF_CLUSTER;
         device.write(fat_addr, &fat_buffer).map_err(|err| ())?;
         device.write(fat2_addr, &fat_buffer).map_err(|err| ())?;
 
         Ok(Self {
             start_addr,
             volume_size,
-            reserved_sector_count: FAT32_RESERVED_SECTOR_COUNT,
+            reserved_sector_count: FAT16_RESERVED_SECTOR_COUNT,
             byte_per_sector: 512,
             sector_per_cluster: FAT_SECTOR_PER_CLUSTER,
             fat_addr,
             fat_size,
             fat2_addr,
-            data_addr: start_addr + FAT32_RESERVED_SECTOR_COUNT + fat_size * 2,
-            free_cluster_count: data_cluster_count - 1,
-            next_free_cluster: 3,
-            root_directory_cluster: 2,
+            data_addr: start_addr + FAT16_RESERVED_SECTOR_COUNT + fat_size * 2,
+            current_cluster: 0,
+            root_directory_cluster: 0,
             use_cache,
-            fat_cache: Cache::new(1, FAT32_CACHE_SIZE),
-            cluster_cache: Cache::new(FAT_SECTOR_PER_CLUSTER as usize, FAT32_CACHE_SIZE),
+            fat_cache: Cache::new(1, FAT16_CACHE_SIZE),
+            cluster_cache: Cache::new(FAT_SECTOR_PER_CLUSTER as usize, FAT16_CACHE_SIZE),
         })
     }
 
@@ -301,20 +240,20 @@ impl FAT32 {
     }
 
     fn get_free_cluster(&mut self, device: &mut dyn BlockIO) -> Result<u32, ()> {
-        let free_cluster = self.next_free_cluster;
-        let cluster_entry_size = self.fat_size * FAT32_CLUSTER_ENTRY_PER_SECTOR;
+        let free_cluster = self.current_cluster + 1;
+        let cluster_entry_size = self.fat_size * FAT16_CLUSTER_ENTRY_PER_SECTOR;
         let mut buffer: Vec<Block<512>> = vec![Block::empty()];
         for cluster_offset in 1..=cluster_entry_size {
             let next_free_cluster = free_cluster.wrapping_add(cluster_offset);
-            let cluster_sector = next_free_cluster / FAT32_CLUSTER_ENTRY_PER_SECTOR;
-            let cluster_offset = next_free_cluster % FAT32_CLUSTER_ENTRY_PER_SECTOR;
-            if cluster_offset == 0 || next_free_cluster % FAT32_CLUSTER_ENTRY_PER_SECTOR == 0 {
+            let cluster_sector = next_free_cluster / FAT16_CLUSTER_ENTRY_PER_SECTOR;
+            let cluster_offset = next_free_cluster % FAT16_CLUSTER_ENTRY_PER_SECTOR;
+            if cluster_offset == 0 || next_free_cluster % FAT16_CLUSTER_ENTRY_PER_SECTOR == 0 {
                 self.get_fat_sector(device, cluster_sector, &mut buffer)
                     .map_err(|err| ())?;
             }
-            if *buffer[0].get::<u32>(cluster_offset as usize) == 0 {
-                self.next_free_cluster = next_free_cluster;
-                return Ok(free_cluster);
+            if *buffer[0].get::<u16>(cluster_offset as usize) == 0 {
+                self.current_cluster = next_free_cluster;
+                return Ok(next_free_cluster);
             }
         }
         Err(())
@@ -322,15 +261,15 @@ impl FAT32 {
 
     fn get_cluster_ptr(&mut self, device: &mut dyn BlockIO, cluster: u32) -> Result<u32, ()> {
         let mut buffer: Vec<Block<512>> = vec![Block::empty()];
-        let cluster_sector = cluster / FAT32_CLUSTER_ENTRY_PER_SECTOR;
-        let cluster_offset = cluster % FAT32_CLUSTER_ENTRY_PER_SECTOR;
+        let cluster_sector = cluster / FAT16_CLUSTER_ENTRY_PER_SECTOR;
+        let cluster_offset = cluster % FAT16_CLUSTER_ENTRY_PER_SECTOR;
         if cluster_sector >= self.fat_size {
             return Err(());
         }
         device
             .read(self.fat_addr + cluster_offset, &mut buffer)
             .map_err(|err| ())?;
-        Ok(*buffer[0].get::<u32>(cluster_offset as usize))
+        Ok(*buffer[0].get::<u16>(cluster_offset as usize) as u32)
     }
 
     fn set_cluster_ptr(
@@ -340,15 +279,15 @@ impl FAT32 {
         next_cluster: u32,
     ) -> Result<u32, ()> {
         let mut buffer: Vec<Block<512>> = vec![Block::empty()];
-        let cluster_sector = cluster / FAT32_CLUSTER_ENTRY_PER_SECTOR;
-        let cluster_offset = cluster % FAT32_CLUSTER_ENTRY_PER_SECTOR;
+        let cluster_sector = cluster / FAT16_CLUSTER_ENTRY_PER_SECTOR;
+        let cluster_offset = cluster % FAT16_CLUSTER_ENTRY_PER_SECTOR;
         if cluster_sector >= self.fat_size {
             return Err(());
         }
         device
             .read(self.fat_addr + cluster_offset, &mut buffer)
             .map_err(|err| ())?;
-        *buffer[0].get_mut::<u32>(cluster_offset as usize) = next_cluster;
+        *buffer[0].get_mut::<u16>(cluster_offset as usize) = next_cluster as u16;
         device
             .write(self.fat_addr + cluster_offset, &buffer)
             .map_err(|err| ())?;
@@ -410,8 +349,7 @@ impl FAT32 {
         let entry_per_sector =
             self.sector_per_cluster as u32 * 512 / size_of::<DirectoryEntry>() as u32;
         let mut buffer: Vec<Block<512>> = vec![Block::empty(); self.sector_per_cluster as usize];
-        let offset = self.sector_per_cluster as u32 * dir_cluster;
-        self.read_cluster(device, self.data_addr + offset, &mut buffer)
+        self.read_cluster(device, dir_cluster, &mut buffer)
             .map_err(|err| ())?;
         for idx in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
             let sector = idx / entry_per_sector;
@@ -466,7 +404,7 @@ impl FAT32 {
     }
 }
 
-impl FileSystem for FAT32 {
+impl FileSystem for FAT16 {
     fn create(
         &mut self,
         device: &mut dyn BlockIO,
@@ -477,7 +415,7 @@ impl FileSystem for FAT32 {
         let mut dir_entry = self.get_dir_entry(device, dir.file_start_idx, dir_entry_idx)?;
         let data_cluster = self.get_free_cluster(device)?;
         let file_name_byte = file_name.as_bytes();
-        self.set_cluster_ptr(device, data_cluster, FAT_END_OF_CLUSTER)?;
+        self.set_cluster_ptr(device, data_cluster, FAT16_END_OF_CLUSTER)?;
         for (idx, c) in dir_entry.name.iter_mut().enumerate() {
             if let Some(char) = file_name_byte.get(idx) {
                 *c = *char;
@@ -516,7 +454,7 @@ impl FileSystem for FAT32 {
                 if entry.attr != FAT_DIR_ATTRIBUTE_FILE {
                     return Err(());
                 }
-                let file_start_idx = entry.start_cluster_idx();
+                let file_start_idx = entry.cluster_low as u32;
                 // debug!("Start Data Cluster={file_start_idx:#X}");
                 return Ok(FileDescriptor {
                     file_start_idx,
@@ -536,7 +474,7 @@ impl FileSystem for FAT32 {
         let mut data_cluster = file.file_start_idx;
         self.set_dir_entry(device, file.dir_idx, file.dir_offset, &entry)?;
 
-        while data_cluster != FAT_END_OF_CLUSTER {
+        while data_cluster < FAT16_END_OF_CLUSTER {
             let next_data_cluster = self.get_cluster_ptr(device, data_cluster)?;
             // debug!("remove: {data_cluster:#X} -> {next_data_cluster:#X}");
             self.set_cluster_ptr(device, data_cluster, 0)?;
@@ -566,7 +504,7 @@ impl FileSystem for FAT32 {
                 file.file_current_idx = self
                     .get_cluster_ptr(device, file.file_current_idx)
                     .map_err(|err| count)?;
-                if file.file_current_idx == FAT_END_OF_CLUSTER {
+                if file.file_current_idx >= FAT16_END_OF_CLUSTER {
                     return Ok(count);
                 }
                 self.read_cluster(device, file.file_current_idx, &mut dev_buffer)
@@ -603,11 +541,11 @@ impl FileSystem for FAT32 {
                 let mut next_cluster = self
                     .get_cluster_ptr(device, file.file_current_idx)
                     .map_err(|err| count)?;
-                if next_cluster == FAT_END_OF_CLUSTER {
+                if next_cluster >= FAT16_END_OF_CLUSTER {
                     let free_cluster = self.get_free_cluster(device).map_err(|err| count)?;
                     self.set_cluster_ptr(device, file.file_current_idx, free_cluster)
                         .map_err(|err| count)?;
-                    self.set_cluster_ptr(device, free_cluster, FAT_END_OF_CLUSTER)
+                    self.set_cluster_ptr(device, free_cluster, FAT16_END_OF_CLUSTER)
                         .map_err(|err| count)?;
                     next_cluster = free_cluster;
                 }
@@ -651,7 +589,7 @@ impl FileSystem for FAT32 {
         dir_entry.set_start_cluster_idx(free_cluster);
         self.set_dir_entry(device, dir.file_start_idx, empty_dir_offset, &dir_entry)?;
 
-        self.set_cluster_ptr(device, free_cluster, FAT_END_OF_CLUSTER)?;
+        self.set_cluster_ptr(device, free_cluster, FAT16_END_OF_CLUSTER)?;
 
         Ok(DirectoryDescriptor {
             file_start_idx: free_cluster,
@@ -741,12 +679,11 @@ impl FileSystem for FAT32 {
         let mut list: Vec<(usize, String)> = Vec::new();
         for offset in 0..FAT_MAX_DIRECTORY_ENTRY_COUNT {
             let entry = self.get_dir_entry(device, dir.file_start_idx, offset)?;
-            let file_start_idx = entry.start_cluster_idx();
-            if file_start_idx != 0 {
-                list.push((
-                    offset as usize,
-                    AsciiStr::from_ascii(&entry.name).unwrap().to_string(),
-                ));
+            if entry.cluster_low != 0 {
+                let name = AsciiStr::from_ascii(&entry.name)
+                    .expect(&format!("name = {:?}", entry.name))
+                    .to_string();
+                list.push((offset as usize, name));
             }
         }
         Ok(list)
@@ -760,15 +697,15 @@ impl FileSystem for FAT32 {
         file.file_current_idx = file.file_start_idx;
 
         let mut data_cluster = file.file_start_idx;
-        if data_cluster != FAT_END_OF_CLUSTER {
+        if data_cluster < FAT16_END_OF_CLUSTER {
             data_cluster = self.get_cluster_ptr(device, data_cluster)?;
-            while data_cluster != FAT_END_OF_CLUSTER {
+            while data_cluster < FAT16_END_OF_CLUSTER {
                 let next_data_cluster = self.get_cluster_ptr(device, data_cluster)?;
                 // debug!("{data_cluster:#X} -> {next_data_cluster:#X}");
                 self.set_cluster_ptr(device, data_cluster, 0)?;
                 data_cluster = next_data_cluster;
             }
-            self.set_cluster_ptr(device, file.file_start_idx, FAT_END_OF_CLUSTER)?;
+            self.set_cluster_ptr(device, file.file_start_idx, FAT16_END_OF_CLUSTER)?;
         }
 
         Ok(())

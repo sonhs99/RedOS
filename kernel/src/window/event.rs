@@ -20,7 +20,7 @@ pub enum EventType {
     Unknown,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum MouseEvent {
     Move,
     Pressed(u8),
@@ -45,6 +45,7 @@ pub enum KeyEvent {
 pub enum UpdateEvent {
     Id(usize),
     Area(Area),
+    All,
 }
 
 #[derive(Clone, Copy)]
@@ -60,6 +61,10 @@ impl Event {
 
     pub const fn event(&self) -> EventType {
         self.event
+    }
+
+    pub const fn dest(&self) -> DestId {
+        self.dest
     }
 }
 
