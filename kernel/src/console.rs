@@ -5,7 +5,11 @@ use crate::{
     graphic::{get_graphic, GraphicWriter, PixelColor},
     interrupt::{apic::LocalAPICRegisters, without_interrupts},
     sync::{Mark, Mutex, OnceLock},
-    window::{frame::WindowFrame, render, Movable, WindowWriter},
+    window::{
+        draw::{draw_rect, Point},
+        frame::WindowFrame,
+        request_update_by_id, Movable, WindowWriter,
+    },
 };
 
 use log::{Level, Log};
@@ -59,15 +63,15 @@ impl Console {
                         16 * self.cursor_row,
                         c,
                         self.fg_color,
-                        self.bg_color,
-                        &mut writer.lock(),
+                        Some(self.bg_color),
+                        &mut writer.lock().body(),
                     ),
                     None => write_ascii(
                         8 * self.cursor_column,
                         16 * self.cursor_row,
                         c,
                         self.fg_color,
-                        self.bg_color,
+                        Some(self.bg_color),
                         &mut get_graphic().lock(),
                     ),
                 }
@@ -95,7 +99,15 @@ impl Console {
         } else {
             match WINDOW_WRITER.get() {
                 Some(writer) => {
-                    writer.lock().move_(0, -16);
+                    let mut body = writer.lock().body();
+                    body.move_(0, -16);
+                    draw_rect(
+                        Point(0, 16 * self.cursor_row as usize),
+                        Point(8 * Self::Columns, 16 * (self.cursor_row as usize + 1)),
+                        self.bg_color,
+                        true,
+                        &mut body,
+                    );
                 }
                 None => {
                     for row in 0..self.cursor_row as usize {
@@ -110,33 +122,22 @@ impl Console {
                                 16 * row as u64,
                                 c,
                                 self.fg_color,
-                                self.bg_color,
+                                Some(self.bg_color),
                                 &mut get_graphic().lock(),
                             )
                         }
                     }
-                }
-            }
-
-            for column in 0..Console::Columns {
-                self.buffer[Console::Rows - 1][column] = 0;
-                match WINDOW_WRITER.get() {
-                    Some(writer) => write_ascii(
-                        8 * column as u64,
-                        16 * self.cursor_row,
-                        b' ',
-                        self.fg_color,
-                        self.bg_color,
-                        &mut writer.lock(),
-                    ),
-                    None => write_ascii(
-                        8 * column as u64,
-                        16 * self.cursor_row,
-                        b' ',
-                        self.fg_color,
-                        self.bg_color,
-                        &mut get_graphic().lock(),
-                    ),
+                    for column in 0..Console::Columns {
+                        self.buffer[Console::Rows - 1][column] = 0;
+                        write_ascii(
+                            8 * column as u64,
+                            16 * self.cursor_row,
+                            b' ',
+                            self.fg_color,
+                            Some(self.bg_color),
+                            &mut get_graphic().lock(),
+                        )
+                    }
                 }
             }
         }
@@ -178,7 +179,8 @@ impl Log for ConsoleLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            println!("[{:>5}]: {}", record.level(), record.args());
+            let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+            println!("[{:>5}: {}]: {}", record.level(), apic_id, record.args());
         }
     }
 
@@ -190,8 +192,11 @@ impl Log for ConsoleLogger {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    CONSOLE.skip().lock().write_fmt(args).unwrap();
-    if WINDOW_WRITER.get().is_some() {
-        render();
+    {
+        CONSOLE.skip().lock().write_fmt(args).unwrap();
+    }
+    if let Some(writer) = WINDOW_WRITER.get() {
+        let id = writer.lock().window_id();
+        request_update_by_id(id);
     }
 }

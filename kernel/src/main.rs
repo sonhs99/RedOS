@@ -9,7 +9,8 @@ use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 use kernel::console::alloc_window;
 use kernel::device::driver::mouse::{get_mouse_state, Mouse};
 use kernel::task::idle::idle_task;
-use kernel::window::component::{write_str, Rectangle};
+use kernel::window::component::Button;
+use kernel::window::draw::{draw_rect, draw_str, Point};
 use kernel::window::event::{EventType, WindowEvent};
 use kernel::window::frame::WindowFrame;
 use kernel::window::{create_window, init_window, window_task, Drawable};
@@ -253,7 +254,6 @@ fn kernel_main(boot_info: BootInfo) {
     }
 
     init_routing_table(msi_vector);
-    create_task(TaskFlags::new(), None, test_window as u64, 0, 0);
     idle_task();
 }
 
@@ -307,86 +307,6 @@ fn test_hdd() {
     //     }
     //     println!();
     // }
-}
-
-fn test_window() {
-    let width = 500;
-    let height = 200;
-    let mut writer = WindowFrame::new(width, height, "Hello, World!");
-    let mut info = writer.info();
-    let id = writer.window_id();
-    let rect = Rectangle::new(
-        width - 20,
-        70,
-        2,
-        0,
-        PixelColor::White,
-        PixelColor::Black,
-        PixelColor::White,
-    );
-    rect.draw(10, 8, &rect.outside_pos(10, 8), &mut info);
-    write_str(
-        20,
-        4,
-        &format!("GUI Information Window[Window ID: {id:#08X}]"),
-        PixelColor::Black,
-        PixelColor::White,
-        &mut info,
-    );
-
-    write_str(
-        16,
-        24,
-        "Mouse Event:",
-        PixelColor::Black,
-        PixelColor::White,
-        &mut info,
-    );
-    write_str(
-        16,
-        40,
-        "Data: X = 0, Y = 0",
-        PixelColor::Black,
-        PixelColor::White,
-        &mut info,
-    );
-
-    loop {
-        if let Some(event) = writer.pop_event() {
-            match event.event() {
-                EventType::Mouse(e, x, y) => {
-                    let str = match e {
-                        kernel::window::event::MouseEvent::Move => "Move",
-                        kernel::window::event::MouseEvent::Pressed(_) => "Pressed",
-                        kernel::window::event::MouseEvent::Released(_) => "Released",
-                    };
-                    write_str(
-                        16,
-                        24,
-                        &format!("Mouse Event: {str:10}"),
-                        PixelColor::Black,
-                        PixelColor::White,
-                        &mut info,
-                    );
-                    write_str(
-                        16,
-                        40,
-                        &format!("Data: X = {x:3}, Y = {y:3}"),
-                        PixelColor::Black,
-                        PixelColor::White,
-                        &mut info,
-                    );
-                }
-                EventType::Window(e) => {
-                    if let WindowEvent::Close = e {
-                        writer.close();
-                        return;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
 }
 
 fn test_hdd_rw() {
@@ -589,13 +509,20 @@ fn test_thread() {
             0,
             data[count],
             PixelColor::Red,
-            PixelColor::Black,
+            Some(PixelColor::Black),
             &mut writer,
         );
         // render();
         count = (count + 1) % 4;
     }
-    write_ascii(0, 0, b' ', PixelColor::Red, PixelColor::White, &mut writer);
+    write_ascii(
+        0,
+        0,
+        b' ',
+        PixelColor::Red,
+        Some(PixelColor::White),
+        &mut writer,
+    );
     info!("Thread id={id}: FPU Test Failed -> left={value1}, right={value2}");
 }
 
@@ -613,7 +540,7 @@ fn test_windmill() {
             offset_y * 16,
             data[count],
             PixelColor::Red,
-            PixelColor::Black,
+            Some(PixelColor::Black),
             &mut get_graphic().lock(),
         );
         count = (count + 1) % 4;

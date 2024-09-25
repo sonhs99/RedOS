@@ -63,7 +63,7 @@ impl<T> Mark<T> {
             0,
             byte,
             PixelColor::Black,
-            COLOR[(apic_id % 4) as usize],
+            Some(COLOR[(apic_id % 4) as usize]),
             &mut get_graphic().lock(),
         );
         unsafe { *self.id.get() = apic_id };

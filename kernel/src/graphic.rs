@@ -9,7 +9,7 @@ pub static PIXEL_WRITER: OnceLock<Mutex<GraphicWriter>> = OnceLock::new();
 static FORMAT: OnceLock<PixelFormat> = OnceLock::new();
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct PixelColor(u8, u8, u8);
+pub struct PixelColor(pub u8, pub u8, pub u8);
 
 impl PixelColor {
     pub const Black: PixelColor = PixelColor(0, 0, 0);

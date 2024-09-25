@@ -22,18 +22,17 @@ pub fn write_ascii(
     y: u64,
     c: u8,
     foreground: PixelColor,
-    background: PixelColor,
+    background: Option<PixelColor>,
     writer: &mut impl Writable,
 ) {
     if let Some(font) = get_font(c as usize) {
         for dy in 0..16usize {
             for dx in 0..8usize {
-                let color = if (font[dy] << dx) & 0x80 != 0 {
-                    foreground
-                } else {
-                    background
-                };
-                writer.write(x as usize + dx, y as usize + dy, color);
+                if (font[dy] << dx) & 0x80 != 0 {
+                    writer.write(x as usize + dx, y as usize + dy, foreground);
+                } else if let Some(background) = background {
+                    writer.write(x as usize + dx, y as usize + dy, background);
+                }
             }
         }
     };

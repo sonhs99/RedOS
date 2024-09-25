@@ -1,22 +1,30 @@
 pub mod component;
+mod curser;
+pub mod draw;
 pub mod event;
 pub mod frame;
+mod test;
+pub mod writer;
 
 use core::ops::DerefMut;
 
 use alloc::vec::Vec;
 use alloc::{sync::Arc, vec};
-use component::write_str;
-use event::{DestId, Event, EventType, MouseEvent, EVENT_QUEUE_SIZE};
-use frame::WindowFrame;
+use event::{DestId, Event, EventType, MouseEvent, UpdateEvent, EVENT_QUEUE_SIZE};
 use hashbrown::HashMap;
 use log::{debug, info};
+
+use curser::print_curser;
+use frame::WindowFrame;
+use test::test_window;
+use writer::FrameBuffer;
 
 use crate::device::driver::keyboard::get_keystate_unblocked;
 use crate::device::driver::mouse::{get_mouse_state, get_mouse_state_unblocked};
 use crate::font::write_ascii;
 use crate::queue::VecQueue;
 use crate::sync::StaticCell;
+use crate::task::{create_task, TaskFlags};
 use crate::utility::abs;
 use crate::{
     graphic::{get_graphic, GraphicWriter, PixelColor},
@@ -24,116 +32,9 @@ use crate::{
     utility::random,
 };
 
-const MOUSE_CURSER: [[u8; 16]; 6] = [
-    [
-        0b1000_0000,
-        0b1000_0000,
-        0b1100_0000,
-        0b1100_0000,
-        0b1110_0000,
-        0b1010_0000,
-        0b1111_0000,
-        0b1001_0000,
-        0b1111_1000,
-        0b1000_1000,
-        0b1111_1100,
-        0b1000_0100,
-        0b1111_1110,
-        0b1000_0010,
-        0b1111_1111,
-        0b1000_0001,
-    ],
-    [
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-        0b0000_0000,
-    ],
-    [
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-        0b1111_1111,
-        0b1000_0000,
-    ],
-    [
-        0b1000_0000,
-        0b1000_0000,
-        0b1100_0000,
-        0b0100_0000,
-        0b1110_0000,
-        0b0010_0000,
-        0b1111_0000,
-        0b0001_0000,
-        0b1111_1000,
-        0b0000_1000,
-        0b1111_1100,
-        0b0000_0100,
-        0b1111_1110,
-        0b1111_1110,
-        0b0000_0000,
-        0b0000_0000,
-    ],
-    [
-        0b1111_1111,
-        0b1000_0011,
-        0b1111_1101,
-        0b1000_0101,
-        0b1111_1000,
-        0b1000_1000,
-        0b1111_0000,
-        0b1001_0000,
-        0b1110_0000,
-        0b1010_0000,
-        0b1100_0000,
-        0b1100_0000,
-        0b1000_0000,
-        0b1000_0000,
-        0b0000_0000,
-        0b0000_0000,
-    ],
-    [
-        0b1100_0000,
-        0b0100_0000,
-        0b1100_0000,
-        0b0100_0000,
-        0b1110_0000,
-        0b1010_0000,
-        0b1110_0000,
-        0b1010_0000,
-        0b0111_0000,
-        0b0101_0000,
-        0b0111_0000,
-        0b0101_0010,
-        0b0011_1000,
-        0b0010_1000,
-        0b0011_1000,
-        0b0011_1000,
-    ],
-];
+pub use writer::WindowWriter;
+
+const MAX_QUEUE_ENQUEUE_COUNT: usize = 10;
 
 enum WindowComponent {
     Body,
@@ -148,6 +49,7 @@ pub trait Drawable {
 pub trait Writable {
     fn write(&mut self, x: usize, y: usize, color: PixelColor);
     fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]);
+    fn write_id(&self) -> Option<usize>;
 }
 
 pub trait Movable {
@@ -172,6 +74,15 @@ impl Area {
             height,
         }
     }
+
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.height
+    }
+
     pub const fn size(&self) -> usize {
         self.width * self.height
     }
@@ -246,52 +157,6 @@ impl Area {
 
 // }
 
-struct FrameBuffer {
-    width: usize,
-    height: usize,
-    buffer: Vec<u32>,
-}
-
-impl FrameBuffer {
-    pub fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            buffer: vec![0; width * height],
-        }
-    }
-}
-
-impl Writable for FrameBuffer {
-    fn write(&mut self, x: usize, y: usize, color: PixelColor) {
-        if x < self.width && y < self.height {
-            self.buffer[y * self.width + x] = color.as_u32()
-        }
-    }
-
-    fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
-        if offset_y < self.height {
-            let len = if buffer.len() < self.width - offset_x {
-                buffer.len()
-            } else {
-                self.width - offset_x
-            };
-            let offset = offset_y * self.width + offset_x;
-            self.buffer[offset..offset + len].copy_from_slice(&buffer[..len]);
-        }
-    }
-}
-
-impl Drawable for FrameBuffer {
-    fn draw(&self, offset_x: usize, offset_y: usize, area: &Area, writer: &mut impl Writable) {
-        for (y, chunk) in self.buffer.chunks(self.width).enumerate() {
-            if y < area.y + self.height && y >= area.y {
-                writer.write_buf(offset_x, offset_y + y, &chunk[area.x..area.x + area.width]);
-            }
-        }
-    }
-}
-
 pub struct Window {
     id: usize,
     width: usize,
@@ -299,7 +164,6 @@ pub struct Window {
     transparent_color: Option<u32>,
     buffer: Vec<u32>,
     event_queue: VecQueue<Event>,
-    update: bool,
     title_area: Option<Area>,
     button_area: Option<Area>,
 }
@@ -313,7 +177,6 @@ impl Window {
             transparent_color: None,
             buffer: vec![0; width * height],
             event_queue: VecQueue::new(Event::default(), EVENT_QUEUE_SIZE),
-            update: true,
             title_area: None,
             button_area: None,
         }
@@ -329,16 +192,6 @@ impl Window {
 
     pub const fn height(&self) -> usize {
         self.height
-    }
-
-    fn take_update(&mut self) -> bool {
-        let flag = self.update;
-        self.update = false;
-        flag
-    }
-
-    pub fn need_update(&mut self) {
-        self.update = true;
     }
 }
 
@@ -367,206 +220,12 @@ impl Drawable for Window {
     }
 }
 
-#[derive(Clone)]
-pub struct WindowWriter(Arc<Mutex<Window>>);
-
-impl WindowWriter {
-    pub fn close(&self) {
-        let mut manager = WINDOW_MANAGER.lock();
-        let id = self.0.lock().id;
-        let area = manager.get_layer(id).area();
-        manager.remove(id);
-        manager.render(&area, &mut get_graphic().lock());
-    }
-
-    pub fn set_title(&self, area: Area) {
-        self.0.lock().title_area = Some(area);
-    }
-
-    pub fn set_button(&self, area: Area) {
-        self.0.lock().button_area = Some(area);
-    }
-
-    pub fn get_area(&self, x: usize, y: usize) -> WindowComponent {
-        if let Some(area) = self.0.lock().button_area {
-            if area.is_in(x, y) {
-                return WindowComponent::Close;
-            }
-        }
-        if let Some(area) = self.0.lock().title_area {
-            if area.is_in(x, y) {
-                return WindowComponent::Title;
-            }
-        }
-        WindowComponent::Body
-    }
-
-    pub fn push_event(&self, event: Event) {
-        let _ = self.0.lock().event_queue.enqueue(event);
-    }
-
-    pub fn pop_event(&self) -> Option<Event> {
-        self.0.lock().event_queue.dequeue().ok()
-    }
-}
-
-impl Writable for WindowWriter {
-    fn write(&mut self, x: usize, y: usize, color: PixelColor) {
-        let mut window = self.0.lock();
-        window.need_update();
-        if x < window.width && y < window.height {
-            let width = window.width;
-            window.buffer[y * width + x] = color.as_u32()
-        }
-    }
-
-    fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
-        let mut window = self.0.lock();
-        window.need_update();
-        if offset_y < window.height {
-            let len = if buffer.len() < window.width - offset_x {
-                buffer.len()
-            } else {
-                window.width - offset_x
-            };
-            let offset = offset_y * window.width + offset_x;
-            window.buffer[offset..offset + len].copy_from_slice(&buffer[..len]);
-        }
-    }
-}
-
-impl Movable for WindowWriter {
-    fn move_(&mut self, offset_x: isize, offset_y: isize) {
-        let width = self.0.lock().width;
-        let height = self.0.lock().height;
-        self.move_range(
-            offset_x,
-            offset_y,
-            Area {
-                x: 0,
-                y: 0,
-                width,
-                height,
-            },
-        )
-    }
-
-    fn move_range(&mut self, offset_x: isize, offset_y: isize, area: Area) {
-        let mut window = self.0.lock();
-        window.need_update();
-
-        let x1_a = abs(offset_x);
-        let y1_a = abs(offset_y);
-        let window_width = window.width;
-        let width = if window.width > area.x + area.width {
-            area.width
-        } else {
-            window.width - area.x
-        };
-        let height = if window.height > area.y + area.height {
-            area.height
-        } else {
-            window.height - area.y
-        };
-
-        let width_len = (width - x1_a);
-        let height_len = (height - y1_a);
-
-        // assert!(area.y + height_len >= window.width);
-
-        let buffer = &mut window.buffer;
-        if offset_y > 0 {
-            for idx_y in (0..height_len).rev() {
-                let offset_dst = window_width * (idx_y + area.y);
-                let offset_src = window_width * (idx_y + area.y - y1_a);
-                if offset_x > 0 {
-                    let offset_src = offset_src - x1_a;
-                    for idx_x in 0..width_len {
-                        if idx_x >= x1_a && idx_y >= y1_a {
-                            buffer[offset_dst + idx_x + area.x] =
-                                buffer[offset_src + idx_x + area.x];
-                        } else {
-                            buffer[offset_dst + idx_x + area.x] = 0;
-                        }
-                    }
-                } else {
-                    let offset_src = offset_src + x1_a;
-                    for idx_x in (0..width_len).rev() {
-                        if idx_x < width - x1_a && idx_y >= y1_a {
-                            buffer[offset_dst + idx_x + area.x] =
-                                buffer[offset_src + idx_x + area.x];
-                        } else {
-                            buffer[offset_dst + idx_x + area.x] = 0;
-                        }
-                    }
-                }
-            }
-        } else {
-            for idx_y in 0..height_len {
-                let offset_dst = window_width * (idx_y + area.y);
-                let offset_src = window_width * (idx_y + area.y + y1_a);
-                if offset_x > 0 {
-                    let offset_src = offset_src - x1_a;
-                    for idx_x in 0..width_len {
-                        if idx_x >= x1_a && idx_y < height - y1_a {
-                            buffer[offset_dst + idx_x + area.x] =
-                                buffer[offset_src + idx_x + area.x];
-                        } else {
-                            buffer[offset_dst + idx_x + area.x] = 0;
-                        }
-                    }
-                } else {
-                    let offset_src = offset_src + x1_a;
-                    for idx_x in (0..width_len).rev() {
-                        if idx_x < width - x1_a && idx_y < height - y1_a {
-                            buffer[offset_dst + idx_x + area.x] =
-                                buffer[offset_src + idx_x + area.x];
-                        } else {
-                            buffer[offset_dst + idx_x + area.x] = 0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub struct PartialWriter<T: Writable> {
-    writer: T,
-    area: Area,
-}
-
-impl<T: Writable> PartialWriter<T> {
-    pub fn new(writer: T, area: Area) -> Self {
-        Self { writer, area }
-    }
-}
-
-impl<T: Writable> Writable for PartialWriter<T> {
-    fn write(&mut self, x: usize, y: usize, color: PixelColor) {
-        if x < self.area.x + self.area.width && y < self.area.y + self.area.height {
-            self.writer.write(x + self.area.x, y + self.area.y, color)
-        }
-    }
-
-    fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
-        if offset_x < self.area.x + self.area.width && offset_y < self.area.y + self.area.height {
-            let buf = if self.area.width - offset_x > buffer.len() {
-                buffer
-            } else {
-                &buffer[..(self.area.width - offset_x)]
-            };
-            self.writer
-                .write_buf(offset_x + self.area.x, offset_y + self.area.y, buf);
-        }
-    }
-}
-
 pub struct Layer {
     x: usize,
     y: usize,
     window: Arc<Mutex<Window>>,
     relocatable: bool,
+    update: bool,
 }
 
 impl Layer {
@@ -583,6 +242,7 @@ impl Layer {
             y,
             window: Arc::new(Mutex::new(Window::new(id, width, height))),
             relocatable,
+            update: true,
         }
     }
 
@@ -594,7 +254,7 @@ impl Layer {
         //     "id={} Move to x={} y={}, dx={}, dy={}",
         //     id, self.x, self.y, dx, dy
         // );
-        self.window.lock().need_update();
+        self.need_update();
     }
 
     pub fn area(&self) -> Area {
@@ -608,7 +268,13 @@ impl Layer {
     }
 
     pub fn take_update(&mut self) -> bool {
-        self.window.lock().take_update()
+        let flag = self.update;
+        self.update = false;
+        flag
+    }
+
+    pub fn need_update(&mut self) {
+        self.update = true;
     }
 
     pub fn writer(&mut self) -> WindowWriter {
@@ -678,8 +344,20 @@ impl WindowManager {
         self.layers
             .insert(id, Layer::new(id, x, y, width, height, relocatable));
         self.stack.push(id);
-        self.get_layer(id).window.lock().need_update();
+        self.push_event(Event::new(
+            DestId::One(id),
+            EventType::Update(event::UpdateEvent::Id(id)),
+        ));
         self.layers.get_mut(&id).expect("Not Found")
+    }
+
+    pub const fn area(&self) -> Area {
+        Area {
+            x: 0,
+            y: 0,
+            width: self.resolution.0,
+            height: self.resolution.1,
+        }
     }
 
     pub fn focus(&mut self, id: usize) {
@@ -693,7 +371,7 @@ impl WindowManager {
             self.stack.remove(idx);
             self.stack.push(id);
         }
-        self.get_layer(id).window.lock().need_update();
+        self.get_layer(id).need_update();
         // debug!("Top Layer id={id}");
     }
 
@@ -717,19 +395,11 @@ impl WindowManager {
                 self.stack.remove(idx);
             }
         }
-        self.get_layer(id).window.lock().need_update();
-    }
-
-    pub const fn area(&self) -> Area {
-        Area {
-            x: 0,
-            y: 0,
-            width: self.resolution.0,
-            height: self.resolution.1,
-        }
+        self.get_layer(id).need_update();
     }
 
     pub fn remove(&mut self, id: usize) {
+        // debug!("[WINDOW] Removed Start");
         for (idx, &window_id) in self.stack.iter().enumerate() {
             if window_id == id {
                 self.stack.remove(idx);
@@ -763,6 +433,17 @@ impl WindowManager {
 
     pub fn get_mouse(&self) -> (usize, usize) {
         (self.mouse_x, self.mouse_y)
+    }
+
+    pub fn push_event(&mut self, event: Event) {
+        if let EventType::Update(update_event) = event.event() {
+            if let UpdateEvent::Id(id) = update_event {
+                if self.get_layer(id).update {
+                    return;
+                }
+            }
+        }
+        self.event_queue.enqueue(event);
     }
 
     fn render_inner(&mut self, area: &Area, writer: &mut impl Writable) {
@@ -811,6 +492,10 @@ impl Writable for GraphicWriter {
     fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
         GraphicWriter::write_buf(&self, offset_x, offset_y, buffer);
     }
+
+    fn write_id(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl<T: Writable> Writable for MutexGuard<'_, T> {
@@ -820,6 +505,10 @@ impl<T: Writable> Writable for MutexGuard<'_, T> {
 
     fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
         self.deref_mut().write_buf(offset_x, offset_y, buffer);
+    }
+
+    fn write_id(&self) -> Option<usize> {
+        None
     }
 }
 
@@ -831,17 +520,17 @@ pub fn init_window(resolution: (usize, usize)) {
     let mut manager = WINDOW_MANAGER.lock();
     let bg_layer = manager.new_layer_pos(0, 0, resolution.0, resolution.1, false);
     let mut writer = bg_layer.writer();
-    let buffer = vec![PixelColor::Blue.as_u32(); resolution.0];
+    let buffer = vec![PixelColor(232, 255, 232).as_u32(); resolution.0];
     for y in 0..resolution.1 {
         writer.write_buf(0, y, &buffer);
     }
 
-    let nav_bar = manager.new_layer_pos(0, 0, resolution.0, 18, false);
-    let mut writer = nav_bar.writer();
-    let buffer = vec![PixelColor::Black.as_u32(); resolution.0];
-    for y in 0..18 {
-        writer.write_buf(0, y, &buffer);
-    }
+    // let nav_bar = manager.new_layer_pos(0, 0, resolution.0, 18, false);
+    // let mut writer = nav_bar.writer();
+    // let buffer = vec![PixelColor::Black.as_u32(); resolution.0];
+    // for y in 0..18 {
+    //     writer.write_buf(0, y, &buffer);
+    // }
     let area = manager.area();
     manager.render(&area, &mut get_graphic().lock());
 }
@@ -860,34 +549,28 @@ pub fn create_window_pos(x: usize, y: usize, width: usize, height: usize) -> Win
         .writer()
 }
 
-pub fn render() {
-    let mut manager = WINDOW_MANAGER.lock();
-    let area = manager.area();
-    WINDOW_MANAGER
-        .lock()
-        .render(&area, &mut get_graphic().lock());
+pub fn request_update_by_id(id: usize) {
+    WINDOW_MANAGER.lock().push_event(Event::new(
+        DestId::One(id),
+        EventType::Update(event::UpdateEvent::Id(id)),
+    ));
 }
 
-fn print_curser(x: usize, y: usize, writer: &mut impl Writable) {
-    for dy in 0..24 {
-        for dx in 0..16 {
-            let tile_high = dy / 8;
-            let tile_low = dx / 8;
-            let tile_idx = tile_high << 1 | tile_low;
-            let offset_x = dx % 8;
-            let offset_y = dy % 8;
-            let high = MOUSE_CURSER[tile_idx][offset_y * 2] >> (7 - offset_x) & 0x01;
-            let low = MOUSE_CURSER[tile_idx][offset_y * 2 + 1] >> (7 - offset_x) & 0x01;
-            match high << 1 | low {
-                0b10 => writer.write(x + dx, y + dy, PixelColor::White),
-                0b11 => writer.write(x + dx, y + dy, PixelColor::Black),
-                _ => {}
-            }
-        }
-    }
+pub fn request_update_by_area(area: Area) {
+    WINDOW_MANAGER.lock().push_event(Event::new(
+        DestId::None,
+        EventType::Update(event::UpdateEvent::Area(area)),
+    ));
 }
 
-fn process_mouse() {
+pub fn request_update_all_windows() {
+    WINDOW_MANAGER.lock().push_event(Event::new(
+        DestId::All,
+        EventType::Update(event::UpdateEvent::All),
+    ));
+}
+
+fn process_mouse() -> bool {
     if let Some(status) = get_mouse_state_unblocked() {
         // debug!("asdf");
         let mut manager = WINDOW_MANAGER.lock();
@@ -909,12 +592,13 @@ fn process_mouse() {
         let dx = mouse_x as isize - prev.0 as isize;
         let dy = mouse_y as isize - prev.1 as isize;
 
+        let mut test = false;
+
         for button in 0..8 {
             if status.pressed(button) {
                 let changed = if button == 0 {
                     manager.focus(window_id);
                     match writer.get_area(local_x, local_y) {
-                        WindowComponent::Body => false,
                         WindowComponent::Title => {
                             is_button_changed = true;
                             writer.push_event(Event::new(
@@ -933,20 +617,26 @@ fn process_mouse() {
                                 DestId::One(window_id),
                                 EventType::Window(event::WindowEvent::Close),
                             ));
+                            // debug!("[WINDOW] Window Remove Start");
+                            test = true;
                             true
                         }
+                        WindowComponent::Body => false,
                     }
                 } else {
                     false
                 };
                 if !changed {
-                    debug!("id={window_id} Pressed");
+                    // debug!("id={window_id} Pressed");
                     is_button_changed = true;
 
                     writer.push_event(Event::new(
                         DestId::One(window_id),
                         EventType::Mouse(event::MouseEvent::Pressed(button), local_x, local_y),
                     ));
+                }
+                if window_id == 0 && button == 0 {
+                    create_task(TaskFlags::new(), None, test_window as u64, 0, 0);
                 }
             }
             if status.released(button) {
@@ -957,9 +647,11 @@ fn process_mouse() {
                     }
                 }
                 is_button_changed = true;
-                debug!("id={window_id} Released");
-                writer.push_event(Event::new(
-                    DestId::One(window_id),
+                let top_writer = manager.top_layer().writer();
+                let top_id = top_writer.write_id().unwrap();
+                // debug!("id={window_id} Released");
+                top_writer.push_event(Event::new(
+                    DestId::One(top_id),
                     EventType::Mouse(event::MouseEvent::Released(button), local_x, local_y),
                 ));
             }
@@ -978,6 +670,13 @@ fn process_mouse() {
         WINDOW_MANAGER
             .lock()
             .render_mouse(mouse_x, mouse_y, area, &mut get_graphic().lock());
+
+        if test {
+            // debug!("test done!");
+        }
+        test
+    } else {
+        false
     }
 }
 
@@ -992,9 +691,56 @@ fn process_keyboard() {
     }
 }
 
+fn process_window() {
+    let mut update = false;
+    let mut global_area = None;
+    for _ in 0..MAX_QUEUE_ENQUEUE_COUNT {
+        let result = WINDOW_MANAGER.lock().event_queue.dequeue();
+        if let Ok(event) = result {
+            match event.event() {
+                EventType::Update(update_event) => {
+                    update = true;
+                    match update_event {
+                        event::UpdateEvent::Id(id) => {
+                            WINDOW_MANAGER.lock().get_layer(id).need_update();
+                        }
+                        event::UpdateEvent::Area(area) => {
+                            global_area = if let Some(a) = global_area {
+                                Some(area.union(&a))
+                            } else {
+                                Some(area)
+                            };
+                        }
+                        event::UpdateEvent::All => {
+                            let mut manager = WINDOW_MANAGER.lock();
+                            let area = manager.area();
+                            manager.update = true;
+                            global_area = Some(manager.area());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            break;
+        }
+    }
+    if update {
+        let mut manager = WINDOW_MANAGER.lock();
+        let area = global_area.unwrap_or(manager.area());
+        WINDOW_MANAGER
+            .lock()
+            .render(&area, &mut get_graphic().lock());
+    }
+}
+
 pub fn window_task() {
     loop {
-        process_mouse();
+        let flag = process_mouse();
         process_keyboard();
+        process_window();
+        if flag {
+            // debug!("done!");
+        }
     }
 }

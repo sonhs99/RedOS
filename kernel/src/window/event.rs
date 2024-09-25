@@ -17,6 +17,7 @@ pub enum EventType {
     Window(WindowEvent),
     Keyboard(KeyEvent),
     Update(UpdateEvent),
+    Custom(CustomEvent),
     Unknown,
 }
 
@@ -47,6 +48,9 @@ pub enum UpdateEvent {
     Area(Area),
     All,
 }
+
+#[derive(Clone, Copy)]
+pub struct CustomEvent([u64; 3]);
 
 #[derive(Clone, Copy)]
 pub struct Event {

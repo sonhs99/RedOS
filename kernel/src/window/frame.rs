@@ -3,10 +3,12 @@ use alloc::vec;
 use crate::{font::write_ascii, graphic::PixelColor};
 
 use super::{
-    component::{write_str, Rectangle},
+    component::Button,
     create_window, create_window_pos,
+    draw::{draw_line, draw_rect, draw_str, Point},
     event::Event,
-    Area, Drawable, Movable, PartialWriter, WindowWriter, Writable,
+    writer::PartialWriter,
+    Area, Drawable, Movable, WindowWriter, Writable,
 };
 
 const CLOSE_BUTTON_IMG: [[u8; 8]; 4] = [
@@ -56,101 +58,156 @@ pub struct WindowFrame {
     writer: WindowWriter,
     width: usize,
     height: usize,
-    title: Rectangle,
-    info: Rectangle,
+    title: Area,
+    body: Area,
 }
 
 impl WindowFrame {
+    pub(crate) const WINDOW_PALETTE_FRAME: PixelColor = PixelColor(109, 218, 22);
+    pub(crate) const WINDOW_PALETTE_TITLE: PixelColor = PixelColor::White;
+    pub(crate) const WINDOW_PALETTE_TITLE_BACKGROUND: PixelColor = PixelColor(79, 204, 11);
+    pub(crate) const WINDOW_PALETTE_BUTTON: PixelColor = PixelColor::White;
+    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER1: PixelColor = PixelColor(229, 229, 229);
+    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER2: PixelColor = PixelColor(86, 86, 86);
+    pub(crate) const WINDOW_PALETTE_BODY: PixelColor = PixelColor::Black;
+    pub(crate) const WINDOW_PALETTE_BODY_BACKGORUND: PixelColor = PixelColor::White;
+
     pub fn new_pos(x: usize, y: usize, width: usize, height: usize, name: &str) -> WindowFrame {
-        let mut writer = create_window_pos(x, y, width + 6, height + 24);
-        Self::inner_new(writer, width, height, name)
+        let mut writer = create_window_pos(x, y, width + 4, height + 23);
+        Self::inner_new(writer, width + 4, height + 23, name)
     }
     pub fn new(width: usize, height: usize, name: &str) -> WindowFrame {
-        let mut writer = create_window(width + 6, height + 24);
-        Self::inner_new(writer, width, height, name)
+        let mut writer = create_window(width + 4, height + 23);
+        Self::inner_new(writer, width + 4, height + 23, name)
     }
 
     fn inner_new(mut writer: WindowWriter, width: usize, height: usize, name: &str) -> Self {
-        let line_buffer = vec![PixelColor::White.as_u32(); width + 4];
-        let bg_buffer = vec![PixelColor::Black.as_u32(); width + 2];
-        let border = Rectangle::new(
-            width + 4,
-            height + 22,
-            1,
-            0,
-            PixelColor::White,
-            PixelColor::White,
-            PixelColor::Black,
-        );
-        border.draw(0, 0, &border.inside_pos(0, 0), &mut writer);
-        let title = Rectangle::new(
-            width,
-            16,
-            1,
-            1,
-            PixelColor::White,
-            PixelColor::White,
-            PixelColor::Black,
-        );
-        title.draw(1, 1, &title.inside_pos(1, 1), &mut writer);
-        let close_btn = Rectangle::new(
-            16,
-            16,
-            1,
-            0,
-            PixelColor::Black,
-            PixelColor::Black,
-            PixelColor::White,
-        );
-        close_btn.draw(
-            width - 17,
-            2,
-            &close_btn.inside_pos(width - 17, 2),
+        // Border
+        draw_rect(
+            Point(0, 0),
+            Point(width - 1, height - 1),
+            Self::WINDOW_PALETTE_FRAME,
+            false,
             &mut writer,
         );
-        let info = Rectangle::new(
-            width,
-            height,
-            1,
-            1,
-            PixelColor::White,
-            PixelColor::Black,
-            PixelColor::White,
+        draw_rect(
+            Point(1, 1),
+            Point(width - 2, height - 2),
+            Self::WINDOW_PALETTE_FRAME,
+            false,
+            &mut writer,
         );
-        info.draw(1, 19, &info.inside_pos(1, 19), &mut writer);
-        let mut title_writer = PartialWriter::new(writer.clone(), title.inside_pos(1, 1));
-        let mut close_btn_writer =
-            PartialWriter::new(writer.clone(), close_btn.inside_pos(width - 17, 2));
-        for x in 0..15 {
-            for y in 0..15 {
-                let tile_x = x / 8;
-                let tile_y = y / 8;
-                let tile_idx = tile_y * 2 + tile_x;
-                let offset_x = x % 8;
-                let offset_y = y % 8;
-                if (CLOSE_BUTTON_IMG[tile_idx][offset_y] << offset_x) & 0x80 != 0 {
-                    close_btn_writer.write(x, y, PixelColor::White);
-                } else {
-                    close_btn_writer.write(x, y, PixelColor::Black);
-                }
-            }
-        }
-        write_str(
-            0,
-            0,
+
+        // Title
+        draw_rect(
+            Point(0, 3),
+            Point(width - 2, 21),
+            Self::WINDOW_PALETTE_TITLE_BACKGROUND,
+            true,
+            &mut writer,
+        );
+
+        draw_str(
+            Point(6, 3),
             name,
-            PixelColor::Black,
-            PixelColor::White,
-            &mut title_writer,
+            Self::WINDOW_PALETTE_TITLE,
+            Self::WINDOW_PALETTE_TITLE_BACKGROUND,
+            &mut writer,
         );
-        writer.set_button(close_btn.outside_pos(width - 17, 2));
-        writer.set_title(title.outside_pos(1, 1));
+
+        // Title - Volume
+        draw_line(
+            Point(1, 1),
+            Point(width - 1, 1),
+            PixelColor(183, 249, 171),
+            &mut writer,
+        );
+        draw_line(
+            Point(1, 2),
+            Point(width - 1, 2),
+            PixelColor(150, 210, 140),
+            &mut writer,
+        );
+        draw_line(
+            Point(1, 2),
+            Point(1, 20),
+            PixelColor(183, 249, 171),
+            &mut writer,
+        );
+        draw_line(
+            Point(2, 2),
+            Point(2, 20),
+            PixelColor(150, 210, 140),
+            &mut writer,
+        );
+
+        let close_btn = Button::new(
+            14,
+            14,
+            2,
+            0,
+            Self::WINDOW_PALETTE_BUTTON_BORDER1,
+            Self::WINDOW_PALETTE_BUTTON_BORDER2,
+            Self::WINDOW_PALETTE_BUTTON,
+            PixelColor::Black,
+        );
+        close_btn.draw(width - 20, 1, &Area::new(0, 0, width, height), &mut writer);
+
+        // Close Button - Cross
+        draw_line(
+            Point(width - 20 + 4, 1 + 4),
+            Point(width - 2 - 4, 19 - 4),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+        draw_line(
+            Point(width - 20 + 5, 1 + 4),
+            Point(width - 2 - 4, 19 - 5),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+        draw_line(
+            Point(width - 20 + 4, 1 + 5),
+            Point(width - 2 - 5, 19 - 4),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+        draw_line(
+            Point(width - 20 + 4, 19 - 4),
+            Point(width - 2 - 4, 1 + 4),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+        draw_line(
+            Point(width - 20 + 5, 19 - 4),
+            Point(width - 2 - 4, 1 + 5),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+        draw_line(
+            Point(width - 20 + 4, 19 - 5),
+            Point(width - 2 - 5, 1 + 4),
+            PixelColor(71, 199, 21),
+            &mut writer,
+        );
+
+        draw_rect(
+            Point(2, 22),
+            Point(width - 2, height - 2),
+            Self::WINDOW_PALETTE_BODY_BACKGORUND,
+            true,
+            &mut writer,
+        );
+
+        writer.set_button(Area::new(width - 20, 1, 18, 18));
+        writer.set_title(Area::new(0, 6, width - 2, 18));
+
         Self {
             writer,
             width,
             height,
-            title,
-            info,
+            title: Area::new(0, 3, width - 1, 18),
+            body: Area::new(2, 22, width - 4, height - 23),
         }
     }
 
@@ -159,11 +216,11 @@ impl WindowFrame {
     }
 
     pub fn title(&self) -> PartialWriter<WindowWriter> {
-        PartialWriter::new(self.writer.clone(), self.title.inside_pos(1, 1))
+        PartialWriter::new(self.writer.clone(), self.title)
     }
 
-    pub fn info(&self) -> PartialWriter<WindowWriter> {
-        PartialWriter::new(self.writer.clone(), self.info.inside_pos(1, 19))
+    pub fn body(&self) -> PartialWriter<WindowWriter> {
+        PartialWriter::new(self.writer.clone(), self.body)
     }
 
     pub fn pop_event(&self) -> Option<Event> {
@@ -172,35 +229,5 @@ impl WindowFrame {
 
     pub fn window_id(&self) -> usize {
         self.writer.0.lock().id
-    }
-}
-
-impl Writable for WindowFrame {
-    fn write(&mut self, x: usize, y: usize, color: PixelColor) {
-        self.writer.write(x + 2, y + 22, color);
-    }
-
-    fn write_buf(&mut self, offset_x: usize, offset_y: usize, buffer: &[u32]) {
-        self.writer.write_buf(offset_x + 2, offset_y + 22, buffer);
-    }
-}
-
-impl Movable for WindowFrame {
-    fn move_(&mut self, offset_x: isize, offset_y: isize) {
-        self.writer.move_range(
-            offset_x,
-            offset_y,
-            Area {
-                x: 2,
-                y: 22,
-                width: self.width,
-                height: self.height,
-            },
-        );
-        // self.writer.move_(offset_x, offset_y)
-    }
-
-    fn move_range(&mut self, offset_x: isize, offset_y: isize, area: Area) {
-        self.writer.move_range(offset_x, offset_y, area);
     }
 }

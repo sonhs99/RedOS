@@ -5,6 +5,7 @@
 #![feature(generic_nonzero)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
+#![feature(generic_const_exprs)]
 #![allow(warnings)]
 
 extern crate alloc;

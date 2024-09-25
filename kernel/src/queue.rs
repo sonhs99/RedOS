@@ -34,6 +34,7 @@ impl<T: Clone + Copy, const N: usize> ArrayQueue<T, N> {
         }
         self.buffer[self.put_idx] = value;
         self.put_idx = (self.put_idx + 1) % N;
+        self.last_op = true;
 
         Ok(())
     }
@@ -44,6 +45,8 @@ impl<T: Clone + Copy, const N: usize> ArrayQueue<T, N> {
         }
         let value = self.buffer[self.get_idx];
         self.get_idx = (self.get_idx + 1) % N;
+        self.last_op = false;
+
         Ok(value)
     }
 }
@@ -79,6 +82,7 @@ impl<T: Copy> VecQueue<T> {
         }
         self.buffer[self.put_idx] = value;
         self.put_idx = (self.put_idx + 1) % self.buffer.len();
+        self.last_op = true;
 
         Ok(())
     }
@@ -89,6 +93,8 @@ impl<T: Copy> VecQueue<T> {
         }
         let value = self.buffer[self.get_idx];
         self.get_idx = (self.get_idx + 1) % self.buffer.len();
+        self.last_op = false;
+
         Ok(value)
     }
 }
