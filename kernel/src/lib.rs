@@ -1,12 +1,10 @@
 #![no_std]
 #![no_main]
-#![feature(lazy_cell)]
-#![feature(generic_arg_infer)]
-#![feature(generic_nonzero)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
-#![feature(generic_const_exprs)]
+#![feature(allocator_api)]
 #![allow(warnings)]
+#![feature(is_none_or)]
 
 extern crate alloc;
 
@@ -14,6 +12,7 @@ pub mod acpi;
 pub mod allocator;
 pub mod ap;
 pub mod cache;
+mod collections;
 pub mod console;
 pub mod device;
 pub mod float;
@@ -25,7 +24,6 @@ pub mod interrupt;
 pub mod ioapic;
 pub mod page;
 pub mod percpu;
-mod queue;
 mod sync;
 pub mod task;
 pub mod timer;
@@ -62,12 +60,18 @@ macro_rules! entry_point {
 fn panic(info: &PanicInfo) -> ! {
     let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     if let Some(running) = running_task() {
-        error!("Core={},PID={}\n{}", apic_id, running.id(), info);
-        if running.id() > 1 {
+        panic_print!(
+            "Core={},PID={},in {}\n{}",
+            apic_id,
+            running.id(),
+            running.name(),
+            info
+        );
+        if !running.flags().is_system_task() {
             exit();
         }
     } else {
-        error!("Core={}\n{}", apic_id, info);
+        panic_print!("Core={}\n{}", apic_id, info);
     }
     loop {}
 }

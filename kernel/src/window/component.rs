@@ -1,4 +1,5 @@
 use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::graphic::PixelColor;
 
@@ -7,6 +8,24 @@ use super::{
     frame::WindowFrame,
     request_update_by_id, Area, Drawable, Writable,
 };
+
+pub struct Palette(Vec<PixelColor>);
+
+impl Palette {
+    pub fn new(data: Vec<PixelColor>) -> Self {
+        Self(data)
+    }
+
+    pub fn get(&self, index: usize) -> Option<PixelColor> {
+        self.0.get(index).cloned()
+    }
+
+    pub fn set(&mut self, index: usize, color: PixelColor) {
+        if let Some(p) = self.0.get_mut(index) {
+            *p = color;
+        }
+    }
+}
 
 pub struct Button {
     width: usize,
@@ -48,9 +67,9 @@ impl Button {
             height,
             border,
             margin,
-            WindowFrame::WINDOW_PALETTE_BUTTON_BORDER1,
-            WindowFrame::WINDOW_PALETTE_BUTTON_BORDER2,
-            WindowFrame::WINDOW_PALETTE_BUTTON,
+            PixelColor(229, 229, 229),
+            PixelColor(86, 86, 86),
+            PixelColor::White,
             PixelColor::Black,
         )
     }

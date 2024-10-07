@@ -1,7 +1,7 @@
 use alloc::format;
 use log::debug;
 
-use crate::{graphic::PixelColor, task::schedule};
+use crate::{graphic::PixelColor, interrupt::apic::LocalAPICRegisters, task::schedule};
 
 use super::{
     component::Button,
@@ -19,6 +19,7 @@ pub fn test_window() {
     let id = writer.window_id();
 
     let mut button = Button::new_default(width - 24, height - 104, 2, 0);
+    let mut apic_id = LocalAPICRegisters::default().local_apic_id().id();
 
     draw_rect(
         Point(10, 8),
@@ -27,6 +28,7 @@ pub fn test_window() {
         false,
         &mut body,
     );
+
     draw_rect(
         Point(11, 9),
         Point(width - 11, 79),
@@ -44,7 +46,15 @@ pub fn test_window() {
     );
 
     draw_str(
-        Point(16, 32),
+        Point(16, 17),
+        &format!("APIC ID: {apic_id}"),
+        PixelColor::Black,
+        PixelColor::White,
+        &mut body,
+    );
+
+    draw_str(
+        Point(16, 33),
         "Mouse Event:",
         PixelColor::Black,
         PixelColor::White,
@@ -52,7 +62,7 @@ pub fn test_window() {
     );
 
     draw_str(
-        Point(16, 48),
+        Point(16, 49),
         "Data: X = 0, Y = 0",
         PixelColor::Black,
         PixelColor::White,
@@ -64,6 +74,17 @@ pub fn test_window() {
     let mut pressed = 0;
     let mut released = 0;
     loop {
+        let current_id = LocalAPICRegisters::default().local_apic_id().id();
+        if apic_id != current_id {
+            apic_id = current_id;
+            draw_str(
+                Point(16, 17),
+                &format!("APIC ID: {apic_id}"),
+                PixelColor::Black,
+                PixelColor::White,
+                &mut body,
+            );
+        }
         if let Some(event) = writer.pop_event() {
             match event.event() {
                 EventType::Mouse(e, x, y) => {
@@ -92,26 +113,27 @@ pub fn test_window() {
                         }
                     };
                     draw_str(
-                        Point(16, 32),
+                        Point(16, 33),
                         &format!("Mouse Event: {str:10}:{value:3}"),
                         PixelColor::Black,
                         PixelColor::White,
                         &mut body,
                     );
                     draw_str(
-                        Point(16, 48),
+                        Point(16, 49),
                         &format!("Data: X = {x:3}, Y = {y:3}"),
                         PixelColor::Black,
                         PixelColor::White,
                         &mut body,
                     );
                 }
-                EventType::Window(e) => {
-                    if let WindowEvent::Close = e {
+                EventType::Window(e) => match e {
+                    WindowEvent::Close => {
                         writer.close();
                         return;
                     }
-                }
+                    _ => {}
+                },
                 _ => {}
             }
         } else {

@@ -3,6 +3,7 @@ use crate::{
     println,
     sync::{Mark, Mutex, OnceLock},
 };
+use alloc::boxed::Box;
 use bootloader::MemoryMap;
 use core::{
     alloc::{GlobalAlloc, Layout},

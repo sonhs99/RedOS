@@ -1,5 +1,6 @@
 use core::slice;
 
+use alloc::collections::btree_map::BTreeMap;
 use alloc::vec;
 use alloc::{
     boxed::Box,
@@ -8,7 +9,6 @@ use alloc::{
 };
 
 use fat::{FAT16, FAT32};
-use hashbrown::HashMap;
 use log::debug;
 
 use crate::{
@@ -132,13 +132,13 @@ struct FileSystemEntry {
 }
 
 pub struct RootFS {
-    tree: HashMap<String, FileSystemEntry>,
+    tree: BTreeMap<String, FileSystemEntry>,
 }
 
 impl RootFS {
     pub fn new() -> Self {
         Self {
-            tree: HashMap::new(),
+            tree: BTreeMap::new(),
         }
     }
 

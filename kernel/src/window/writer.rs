@@ -56,9 +56,10 @@ impl Writable for FrameBuffer {
 
 impl Drawable for FrameBuffer {
     fn draw(&self, offset_x: usize, offset_y: usize, area: &Area, writer: &mut impl Writable) {
+        let end = (area.x + area.width).clamp(0, self.width);
         for (y, chunk) in self.buffer.chunks(self.width).enumerate() {
             if y < area.y + self.height && y >= area.y {
-                writer.write_buf(offset_x, offset_y + y, &chunk[area.x..area.x + area.width]);
+                writer.write_buf(offset_x + area.x, offset_y + y, &chunk[area.x..end]);
             }
         }
     }
@@ -68,11 +69,15 @@ impl Drawable for FrameBuffer {
 pub struct WindowWriter(pub(crate) Arc<Mutex<Window>>);
 
 impl WindowWriter {
-    pub fn close(&self) {
-        let mut manager = WINDOW_MANAGER.lock();
-        let id = self.0.lock().id;
-        let area = manager.get_layer(id).area();
-        manager.remove(id);
+    pub fn close(self) {
+        let area = {
+            let mut manager = WINDOW_MANAGER.lock();
+            let window = self.0.lock();
+            let id = window.id;
+            let area = manager.get_layer(id).unwrap().area();
+            manager.remove(id);
+            area
+        };
         request_update_by_area(area);
     }
 

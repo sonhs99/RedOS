@@ -259,55 +259,52 @@ pub extern "C" fn divided_by_zero(stack_frame: &ExceptionStackFrame) {
 }
 
 pub extern "C" fn invalid_opcode(stack_frame: &ExceptionStackFrame) {
-    unsafe { asm!("mov r10, 0xdea0beef") };
-    if let Some(running) = running_task() {
-        println!("[EXCEP]: PID={}", running.id());
-        println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
-        if running.id() > 2 {
-            exit();
-        } else {
-            loop {}
-        }
-    } else {
-        println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
-        loop {}
-    }
+    panic!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
+    // if let Some(running) = running_task() {
+    //     let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+    //     println!(
+    //         "[EXCEP]: core={},PID={}, in {}",
+    //         apic_id,
+    //         running.id(),
+    //         running.name()
+    //     );
+    //     println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
+    //     if !running.flags().is_system_task() {
+    //         exit();
+    //     } else {
+    //         loop {}
+    //     }
+    // } else {
+    //     println!("[EXCEP]: INVALID_OPCODE\n{stack_frame:#X?}");
+    //     loop {}
+    // }
 }
 
 pub extern "C" fn device_not_available(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    unsafe { asm!("mov r10, 0xde0dbeef") };
-    println!("[EXCEP]: DEVICE_NOT_AVAILABLE with code {error_code}\n{stack_frame:#X?}");
+    panic!("[EXCEP]: DEVICE_NOT_AVAILABLE with code {error_code}\n{stack_frame:#X?}");
     loop {}
 }
 
 pub extern "C" fn page_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    unsafe { asm!("mov r10, 0xdeadb0ef") };
-    if let Some(running) = running_task() {
-        println!("[EXCEP]: PID={}", running.id());
-        println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
-        if running.id() > 1 {
-            exit();
-        } else {
-            loop {}
-        }
-    } else {
-        println!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
-        loop {}
-    }
+    panic!("[EXCEP]: PAGE_FAULT with code {error_code}\n{stack_frame:#X?}");
 }
 
 pub extern "C" fn double_fault(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    unsafe { asm!("mov r10, 0xdeadbe0f") };
     println!("[EXCEP]: DOUBLE_FAULT with code {error_code}\n{stack_frame:#X?}");
     loop {}
 }
 
 pub extern "C" fn general_protection(stack_frame: &ExceptionStackFrame, error_code: u64) {
-    unsafe { asm!("mov r10, 0xdeadbee0") };
     if let Some(running) = running_task() {
-        println!("[EXCEP]: PID={}", running.id());
+        let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+        println!(
+            "[EXCEP]: core={},PID={}, in {}",
+            apic_id,
+            running.id(),
+            running.name()
+        );
         println!("[EXCEP]: GENERAL_PROTECTION_FAULT with code {error_code}\n{stack_frame:#X?}");
-        if running.id() > 1 {
+        if !running.flags().is_system_task() {
             exit();
         } else {
             loop {}
@@ -320,7 +317,13 @@ pub extern "C" fn general_protection(stack_frame: &ExceptionStackFrame, error_co
 
 pub extern "C" fn break_point(stack_frame: &ExceptionStackFrame) {
     if let Some(running) = running_task() {
-        println!("[EXCEP]: PID={}", running.id());
+        let apic_id = LocalAPICRegisters::default().local_apic_id().id();
+        println!(
+            "[EXCEP]: core={},PID={}, in {}",
+            apic_id,
+            running.id(),
+            running.name()
+        );
     }
     println!(
         "[EXCEP]: BREAKPOINT at {:#X}\n{:#X?}",

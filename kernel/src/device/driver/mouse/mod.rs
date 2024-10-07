@@ -2,7 +2,7 @@ use log::debug;
 use usb::USBMouseDriver;
 
 use crate::{
-    queue::ArrayQueue,
+    collections::queue::Queue,
     sync::{Mark, Mutex},
     task::schedule,
 };
@@ -12,8 +12,9 @@ pub mod usb;
 const MOUSE_BUFFER_LENGTH: usize = 200;
 const MAX_SKIP_MOUSE_EVENT: usize = 20;
 
-static QUEUE: Mark<Mutex<ArrayQueue<MouseState, MOUSE_BUFFER_LENGTH>>> =
-    Mark::new(Mutex::new(ArrayQueue::new(MouseState::empty())));
+static QUEUE: Mark<Mutex<Queue<[MouseState; MOUSE_BUFFER_LENGTH]>>> = Mark::new(Mutex::new(
+    Queue::new([MouseState::empty(); MOUSE_BUFFER_LENGTH]),
+));
 
 #[derive(Clone, Copy)]
 pub struct MouseState {

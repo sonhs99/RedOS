@@ -3,7 +3,7 @@ use alloc::vec;
 use crate::{font::write_ascii, graphic::PixelColor};
 
 use super::{
-    component::Button,
+    component::{Button, Palette},
     create_window, create_window_pos,
     draw::{draw_line, draw_rect, draw_str, Point},
     event::Event,
@@ -60,17 +60,18 @@ pub struct WindowFrame {
     height: usize,
     title: Area,
     body: Area,
+    palette: Palette,
 }
 
 impl WindowFrame {
-    pub(crate) const WINDOW_PALETTE_FRAME: PixelColor = PixelColor(109, 218, 22);
-    pub(crate) const WINDOW_PALETTE_TITLE: PixelColor = PixelColor::White;
-    pub(crate) const WINDOW_PALETTE_TITLE_BACKGROUND: PixelColor = PixelColor(79, 204, 11);
-    pub(crate) const WINDOW_PALETTE_BUTTON: PixelColor = PixelColor::White;
-    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER1: PixelColor = PixelColor(229, 229, 229);
-    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER2: PixelColor = PixelColor(86, 86, 86);
-    pub(crate) const WINDOW_PALETTE_BODY: PixelColor = PixelColor::Black;
-    pub(crate) const WINDOW_PALETTE_BODY_BACKGORUND: PixelColor = PixelColor::White;
+    pub(crate) const WINDOW_PALETTE_FRAME: usize = 0;
+    pub(crate) const WINDOW_PALETTE_TITLE: usize = 1;
+    pub(crate) const WINDOW_PALETTE_TITLE_BACKGROUND: usize = 2;
+    pub(crate) const WINDOW_PALETTE_BUTTON: usize = 3;
+    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER1: usize = 4;
+    pub(crate) const WINDOW_PALETTE_BUTTON_BORDER2: usize = 5;
+    pub(crate) const WINDOW_PALETTE_BODY: usize = 6;
+    pub(crate) const WINDOW_PALETTE_BODY_BACKGORUND: usize = 7;
 
     pub fn new_pos(x: usize, y: usize, width: usize, height: usize, name: &str) -> WindowFrame {
         let mut writer = create_window_pos(x, y, width + 4, height + 23);
@@ -82,18 +83,28 @@ impl WindowFrame {
     }
 
     fn inner_new(mut writer: WindowWriter, width: usize, height: usize, name: &str) -> Self {
+        let palette = Palette::new(vec![
+            PixelColor(109, 218, 22),
+            PixelColor::White,
+            PixelColor(79, 204, 11),
+            PixelColor::White,
+            PixelColor(229, 229, 229),
+            PixelColor(86, 86, 86),
+            PixelColor::Black,
+            PixelColor::White,
+        ]);
         // Border
         draw_rect(
             Point(0, 0),
             Point(width - 1, height - 1),
-            Self::WINDOW_PALETTE_FRAME,
+            palette.get(Self::WINDOW_PALETTE_FRAME).unwrap(),
             false,
             &mut writer,
         );
         draw_rect(
             Point(1, 1),
             Point(width - 2, height - 2),
-            Self::WINDOW_PALETTE_FRAME,
+            palette.get(Self::WINDOW_PALETTE_FRAME).unwrap(),
             false,
             &mut writer,
         );
@@ -102,7 +113,7 @@ impl WindowFrame {
         draw_rect(
             Point(0, 3),
             Point(width - 2, 21),
-            Self::WINDOW_PALETTE_TITLE_BACKGROUND,
+            palette.get(Self::WINDOW_PALETTE_TITLE_BACKGROUND).unwrap(),
             true,
             &mut writer,
         );
@@ -110,8 +121,8 @@ impl WindowFrame {
         draw_str(
             Point(6, 3),
             name,
-            Self::WINDOW_PALETTE_TITLE,
-            Self::WINDOW_PALETTE_TITLE_BACKGROUND,
+            palette.get(Self::WINDOW_PALETTE_TITLE).unwrap(),
+            palette.get(Self::WINDOW_PALETTE_TITLE_BACKGROUND).unwrap(),
             &mut writer,
         );
 
@@ -146,9 +157,9 @@ impl WindowFrame {
             14,
             2,
             0,
-            Self::WINDOW_PALETTE_BUTTON_BORDER1,
-            Self::WINDOW_PALETTE_BUTTON_BORDER2,
-            Self::WINDOW_PALETTE_BUTTON,
+            palette.get(Self::WINDOW_PALETTE_BUTTON_BORDER1).unwrap(),
+            palette.get(Self::WINDOW_PALETTE_BUTTON_BORDER2).unwrap(),
+            palette.get(Self::WINDOW_PALETTE_BUTTON).unwrap(),
             PixelColor::Black,
         );
         close_btn.draw(width - 20, 1, &Area::new(0, 0, width, height), &mut writer);
@@ -194,7 +205,7 @@ impl WindowFrame {
         draw_rect(
             Point(2, 22),
             Point(width - 2, height - 2),
-            Self::WINDOW_PALETTE_BODY_BACKGORUND,
+            palette.get(Self::WINDOW_PALETTE_BODY_BACKGORUND).unwrap(),
             true,
             &mut writer,
         );
@@ -206,12 +217,13 @@ impl WindowFrame {
             writer,
             width,
             height,
-            title: Area::new(0, 3, width - 1, 18),
-            body: Area::new(2, 22, width - 4, height - 23),
+            title: Area::new(0, 0, width, 21),
+            body: Area::new(2, 22, width - 4, height - 24),
+            palette,
         }
     }
 
-    pub fn close(&self) {
+    pub fn close(self) {
         self.writer.close();
     }
 
@@ -229,5 +241,17 @@ impl WindowFrame {
 
     pub fn window_id(&self) -> usize {
         self.writer.0.lock().id
+    }
+
+    pub fn set_background(&mut self, color: PixelColor) {
+        self.palette
+            .set(Self::WINDOW_PALETTE_BODY_BACKGORUND, color);
+        draw_rect(
+            Point(0, 0),
+            Point(self.width, self.height),
+            color,
+            true,
+            &mut self.body(),
+        );
     }
 }

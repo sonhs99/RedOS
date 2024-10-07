@@ -3,27 +3,29 @@ mod curser;
 pub mod draw;
 pub mod event;
 pub mod frame;
+pub mod manager;
 mod test;
 pub mod writer;
 
 use core::ops::DerefMut;
 
+use alloc::fmt::format;
+use alloc::format;
 use alloc::vec::Vec;
 use alloc::{sync::Arc, vec};
+use draw::Point;
 use event::{DestId, Event, EventType, MouseEvent, UpdateEvent, EVENT_QUEUE_SIZE};
-use hashbrown::HashMap;
+// use hashbrown::HashMap;
 use log::{debug, info};
 
-use curser::print_curser;
 use frame::WindowFrame;
+use manager::WindowManager;
 use test::test_window;
 use writer::FrameBuffer;
 
+use crate::collections::queue::Queue;
 use crate::device::driver::keyboard::get_keystate_unblocked;
 use crate::device::driver::mouse::{get_mouse_state, get_mouse_state_unblocked};
-use crate::font::write_ascii;
-use crate::queue::VecQueue;
-use crate::sync::StaticCell;
 use crate::task::{create_task, TaskFlags};
 use crate::utility::abs;
 use crate::{
@@ -55,6 +57,17 @@ pub trait Writable {
 pub trait Movable {
     fn move_(&mut self, offset_x: isize, offset_y: isize);
     fn move_range(&mut self, offset_x: isize, offset_y: isize, area: Area);
+}
+
+pub trait BitmapDrawable: Drawable {
+    fn bitmap_draw(
+        &self,
+        offset_x: usize,
+        offset_y: usize,
+        area: &Area,
+        bitmap: &mut DrawBitmap,
+        writer: &mut impl Writable,
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -153,9 +166,59 @@ impl Area {
     }
 }
 
-// struct DrawBitmap {
+struct DrawBitmap {
+    area: Area,
+    bitmap: Vec<u8>,
+}
 
-// }
+impl DrawBitmap {
+    pub fn new(area: Area) -> Self {
+        let size = (area.size() + 7) / 8;
+        Self {
+            area,
+            bitmap: vec![0u8; size],
+        }
+    }
+
+    pub fn mark_area(&mut self, area: &Area) {
+        if let Some(conjointed) = area.conjoint(&self.area) {
+            let width = self.area.width;
+            let offset_area = conjointed.offset_of(&self.area);
+            for y in offset_area.y..(offset_area.y + offset_area.height) {
+                let offset = y * width;
+                let start = offset_area.x + offset;
+                let end = offset_area.x + offset_area.width + offset;
+                for idx in (start + 7) / 8..(end - 1) / 8 {
+                    self.bitmap[idx] = 0xFF;
+                }
+                let remain = 8 - start % 8;
+                self.bitmap[start / 8] |= 0xFFu8.wrapping_shr(remain as u32);
+                let remain = 8 - end % 8;
+                self.bitmap[(end - 1) / 8] |= 0xFFu8.wrapping_shl(remain as u32);
+            }
+        }
+    }
+
+    pub fn point(&self, point: Point) -> bool {
+        if self.area.is_in(point.0, point.1) {
+            let local = Point(point.0 - self.area.x, point.1 - self.area.y);
+            let idx = local.0 + local.1 * self.area.width;
+            let offset = idx % 8;
+            (self.bitmap[idx / 8] >> (7 - offset)) & 0x01 == 0
+        } else {
+            false
+        }
+    }
+
+    pub fn set_point(&mut self, point: Point) {
+        if self.area.is_in(point.0, point.1) {
+            let local = Point(point.0 - self.area.x, point.1 - self.area.y);
+            let idx = point.0 + point.1 * self.area.width;
+            let offset = idx % 8;
+            self.bitmap[idx / 8] |= 0x01 << (7 - offset);
+        }
+    }
+}
 
 pub struct Window {
     id: usize,
@@ -163,7 +226,7 @@ pub struct Window {
     height: usize,
     transparent_color: Option<u32>,
     buffer: Vec<u32>,
-    event_queue: VecQueue<Event>,
+    event_queue: Queue<Vec<Event>>,
     title_area: Option<Area>,
     button_area: Option<Area>,
 }
@@ -176,7 +239,7 @@ impl Window {
             height,
             transparent_color: None,
             buffer: vec![0; width * height],
-            event_queue: VecQueue::new(Event::default(), EVENT_QUEUE_SIZE),
+            event_queue: Queue::new(vec![Event::default(); EVENT_QUEUE_SIZE]),
             title_area: None,
             button_area: None,
         }
@@ -197,24 +260,53 @@ impl Window {
 
 impl Drawable for Window {
     fn draw(&self, offset_x: usize, offset_y: usize, area: &Area, writer: &mut impl Writable) {
-        if let Some(transparent) = self.transparent_color {
-            for (idx, &color) in self.buffer.iter().enumerate() {
-                let x = idx % self.height;
-                let y = idx / self.height;
-                if area.is_in(x, y) && color != transparent {
-                    writer.write(x + offset_x, y + offset_y, color.into());
+        for (y, chunk) in self.buffer[area.y * self.width..(area.y + area.height) * self.width]
+            .chunks(self.width)
+            .enumerate()
+        {
+            if let Some(transparent) = self.transparent_color {
+                for x in area.x..area.x + area.width {
+                    if chunk[x] != transparent {
+                        writer.write(
+                            offset_x + area.x + x,
+                            offset_y + area.y + y,
+                            chunk[x].into(),
+                        );
+                    }
                 }
-            }
-        } else {
-            for (y, chunk) in self.buffer[area.y * self.width..(area.y + area.height) * self.width]
-                .chunks(self.width)
-                .enumerate()
-            {
+            } else {
                 writer.write_buf(
                     offset_x + area.x,
                     offset_y + area.y + y,
                     &chunk[area.x..area.x + area.width],
                 );
+            }
+        }
+    }
+}
+
+impl BitmapDrawable for Window {
+    fn bitmap_draw(
+        &self,
+        offset_x: usize,
+        offset_y: usize,
+        area: &Area,
+        bitmap: &mut DrawBitmap,
+        writer: &mut impl Writable,
+    ) {
+        for (y, chunk) in self.buffer[area.y * self.width..(area.y + area.height) * self.width]
+            .chunks(self.width)
+            .enumerate()
+        {
+            if let Some(transparent) = self.transparent_color {
+                for x in area.x..area.x + area.width {
+                    let global_x = offset_x + area.x + x;
+                    let global_y = offset_y + area.y + y;
+                    if bitmap.point(Point(global_x, global_y)) {
+                        writer.write(global_x, global_y, chunk[x].into());
+                        bitmap.set_point(Point(global_x, global_y));
+                    }
+                }
             }
         }
     }
@@ -285,7 +377,7 @@ impl Layer {
 impl Drawable for Layer {
     fn draw(&self, offset_x: usize, offset_y: usize, area: &Area, writer: &mut impl Writable) {
         let my_area = self.area();
-        if let Some(conjointed_area) = area.conjoint(&my_area) {
+        if let Some(conjointed_area) = self.area().conjoint(&my_area) {
             let offset_area = conjointed_area.offset_of(&my_area);
             self.window
                 .lock()
@@ -294,193 +386,27 @@ impl Drawable for Layer {
     }
 }
 
-pub struct WindowManager {
-    layers: HashMap<usize, Layer>,
-    stack: Vec<usize>,
-    global: FrameBuffer,
-    resolution: (usize, usize),
-    event_queue: VecQueue<Event>,
-    count: usize,
-    mouse_x: usize,
-    mouse_y: usize,
-    update: bool,
-    moving: bool,
-}
-
-impl WindowManager {
-    pub fn new(resolution: (usize, usize)) -> Self {
-        Self {
-            layers: HashMap::new(),
-            stack: Vec::new(),
-            global: FrameBuffer::new(resolution.0, resolution.1),
-            resolution,
-            event_queue: VecQueue::new(Event::default(), EVENT_QUEUE_SIZE),
-            count: 0,
-            mouse_x: resolution.0 / 2,
-            mouse_y: resolution.1 / 2,
-            update: false,
-            moving: false,
-        }
-    }
-
-    pub fn new_layer(&mut self, width: usize, height: usize, relocatable: bool) -> &mut Layer {
-        let (x, y) = (
-            random() as usize % self.resolution.0,
-            random() as usize % self.resolution.1,
-        );
-        self.new_layer_pos(x, y, width, height, relocatable)
-    }
-
-    pub fn new_layer_pos(
-        &mut self,
-        x: usize,
-        y: usize,
-        width: usize,
-        height: usize,
-        relocatable: bool,
-    ) -> &mut Layer {
-        let id = self.count;
-        self.count = self.count.wrapping_add(1);
-        self.layers
-            .insert(id, Layer::new(id, x, y, width, height, relocatable));
-        self.stack.push(id);
-        self.push_event(Event::new(
-            DestId::One(id),
-            EventType::Update(event::UpdateEvent::Id(id)),
-        ));
-        self.layers.get_mut(&id).expect("Not Found")
-    }
-
-    pub const fn area(&self) -> Area {
-        Area {
-            x: 0,
-            y: 0,
-            width: self.resolution.0,
-            height: self.resolution.1,
-        }
-    }
-
-    pub fn focus(&mut self, id: usize) {
-        if !self.layers.contains_key(&id) {
-            return;
-        }
-        if !self.get_layer(id).relocatable {
-            return;
-        }
-        if let Some((idx, _)) = self.stack.iter().enumerate().find(|(idx, &x)| x == id) {
-            self.stack.remove(idx);
-            self.stack.push(id);
-        }
-        self.get_layer(id).need_update();
-        // debug!("Top Layer id={id}");
-    }
-
-    pub fn visibility(&mut self, id: usize, visible: bool) {
-        if !self.layers.contains_key(&id) {
-            return;
-        }
-
-        if visible {
-            if self
-                .stack
-                .iter()
-                .enumerate()
-                .find(|(idx, &x)| x == id)
-                .is_none()
-            {
-                self.stack.push(id);
-            }
-        } else {
-            if let Some((idx, _)) = self.stack.iter().enumerate().find(|(idx, &x)| x == id) {
-                self.stack.remove(idx);
-            }
-        }
-        self.get_layer(id).need_update();
-    }
-
-    pub fn remove(&mut self, id: usize) {
-        // debug!("[WINDOW] Removed Start");
-        for (idx, &window_id) in self.stack.iter().enumerate() {
-            if window_id == id {
-                self.stack.remove(idx);
-                break;
-            }
-        }
-
-        self.layers.remove(&id);
-        self.update = true;
-        // debug!("[WINDOW] Window ID={id} Removed");
-    }
-
-    pub fn get_layer(&mut self, id: usize) -> &mut Layer {
-        self.layers.get_mut(&id).unwrap()
-    }
-
-    pub fn top_layer(&mut self) -> &mut Layer {
-        let top_id = self.stack.last().unwrap();
-        self.layers.get_mut(top_id).unwrap()
-    }
-
-    pub fn get_layer_id_from_point(&mut self, x: usize, y: usize) -> usize {
-        for layer_id in self.stack.iter().rev() {
-            let layer = self.layers.get_mut(layer_id).expect("Not Found");
-            if layer.area().is_in(x, y) {
-                return *layer_id;
-            }
-        }
-        0
-    }
-
-    pub fn get_mouse(&self) -> (usize, usize) {
-        (self.mouse_x, self.mouse_y)
-    }
-
-    pub fn push_event(&mut self, event: Event) {
-        if let EventType::Update(update_event) = event.event() {
-            if let UpdateEvent::Id(id) = update_event {
-                if self.get_layer(id).update {
-                    return;
-                }
-            }
-        }
-        self.event_queue.enqueue(event);
-    }
-
-    fn render_inner(&mut self, area: &Area, writer: &mut impl Writable) {
-        let mut flag = self.update;
-        let mut area = area.clone();
-        for layer_id in self.stack.iter() {
-            let layer = self.layers.get_mut(layer_id).expect("Not Found");
-            let update_flag = layer.take_update();
-            if update_flag {
-                area = layer.area().union(&area);
-            }
-            flag = flag || update_flag;
-            if flag {
-                layer.draw(0, 0, &area, &mut self.global);
-            }
-        }
-        self.update = false;
-        print_curser(self.mouse_x, self.mouse_y, &mut self.global);
-    }
-
-    pub fn render_mouse(
-        &mut self,
-        x: usize,
-        y: usize,
-        prev_area: Area,
+impl BitmapDrawable for Layer {
+    fn bitmap_draw(
+        &self,
+        offset_x: usize,
+        offset_y: usize,
+        area: &Area,
+        bitmap: &mut DrawBitmap,
         writer: &mut impl Writable,
     ) {
-        self.mouse_x = x;
-        self.mouse_y = y;
-        self.update = true;
-        self.render_inner(&prev_area, writer);
-        self.global.draw(0, 0, &self.area(), writer);
-    }
-
-    pub fn render(&mut self, area: &Area, writer: &mut impl Writable) {
-        self.render_inner(&area, writer);
-        self.global.draw(0, 0, area, writer);
+        let my_area = self.area();
+        if let Some(conjointed_area) = self.area().conjoint(&my_area) {
+            let offset_area = conjointed_area.offset_of(&my_area);
+            self.window.lock().bitmap_draw(
+                offset_x + self.x,
+                offset_y + self.y,
+                &offset_area,
+                bitmap,
+                writer,
+            );
+        }
+        // bitmap.mark_area(&my_area);
     }
 }
 
@@ -570,29 +496,29 @@ pub fn request_update_all_windows() {
     ));
 }
 
-fn process_mouse() -> bool {
+fn process_mouse() {
     if let Some(status) = get_mouse_state_unblocked() {
         // debug!("asdf");
         let mut manager = WINDOW_MANAGER.lock();
 
-        let resolution = manager.resolution;
+        let resolution = manager.resolution();
         let prev = manager.get_mouse();
         let mut area = Area::new(prev.0, prev.1, 16, 24);
         let mouse_x =
             (prev.0 as isize + status.x_v() as isize).clamp(0, resolution.0 as isize - 1) as usize;
         let mouse_y =
             (prev.1 as isize + status.y_v() as isize).clamp(0, resolution.1 as isize - 1) as usize;
+        let new_area = Area::new(mouse_x, mouse_y, 16, 24);
 
         let window_id = manager.get_layer_id_from_point(mouse_x, mouse_y);
-        let writer = manager.get_layer(window_id).writer();
+        let layer = manager.get_layer(window_id).unwrap();
 
+        let (local_x, local_y) = layer.area().local(mouse_x, mouse_y);
+        let writer = layer.writer();
         let mut is_button_changed = false;
-        let (local_x, local_y) = manager.get_layer(window_id).area().local(mouse_x, mouse_y);
 
         let dx = mouse_x as isize - prev.0 as isize;
         let dy = mouse_y as isize - prev.1 as isize;
-
-        let mut test = false;
 
         for button in 0..8 {
             if status.pressed(button) {
@@ -608,7 +534,7 @@ fn process_mouse() -> bool {
                             // debug!("id={window_id} Drag Start");
                             area = manager.top_layer().area().union(&area);
                             manager.top_layer().move_(dx, dy);
-                            manager.moving = true;
+                            manager.set_moving(true);
                             true
                         }
                         WindowComponent::Close => {
@@ -618,7 +544,6 @@ fn process_mouse() -> bool {
                                 EventType::Window(event::WindowEvent::Close),
                             ));
                             // debug!("[WINDOW] Window Remove Start");
-                            test = true;
                             true
                         }
                         WindowComponent::Body => false,
@@ -636,14 +561,21 @@ fn process_mouse() -> bool {
                     ));
                 }
                 if window_id == 0 && button == 0 {
-                    create_task(TaskFlags::new(), None, test_window as u64, 0, 0);
+                    create_task(
+                        "WindowTest",
+                        TaskFlags::new(),
+                        None,
+                        test_window as u64,
+                        0,
+                        0,
+                    );
                 }
             }
             if status.released(button) {
                 if button == 0 {
-                    if manager.moving {
+                    if manager.moving() {
                         // debug!("id={window_id} Drag End");
-                        manager.moving = false;
+                        manager.set_moving(false);
                     }
                 }
                 is_button_changed = true;
@@ -661,22 +593,18 @@ fn process_mouse() -> bool {
                 DestId::One(window_id),
                 EventType::Mouse(event::MouseEvent::Move, local_x, local_y),
             ));
-            if manager.moving {
+            if manager.moving() {
                 area = manager.top_layer().area().union(&area);
                 manager.top_layer().move_(dx, dy);
             }
         }
 
-        WINDOW_MANAGER
-            .lock()
-            .render_mouse(mouse_x, mouse_y, area, &mut get_graphic().lock());
-
-        if test {
-            // debug!("test done!");
-        }
-        test
-    } else {
-        false
+        // WINDOW_MANAGER
+        //     .lock()
+        //     .render_mouse(mouse_x, mouse_y, area, &mut get_graphic().lock());
+        WINDOW_MANAGER.lock().set_mouse(Point(mouse_x, mouse_y));
+        request_update_by_area(area.union(&new_area));
+        request_update_all_windows();
     }
 }
 
@@ -695,27 +623,35 @@ fn process_window() {
     let mut update = false;
     let mut global_area = None;
     for _ in 0..MAX_QUEUE_ENQUEUE_COUNT {
-        let result = WINDOW_MANAGER.lock().event_queue.dequeue();
+        let result = WINDOW_MANAGER.lock().pop_event();
         if let Ok(event) = result {
             match event.event() {
                 EventType::Update(update_event) => {
                     update = true;
                     match update_event {
-                        event::UpdateEvent::Id(id) => {
-                            WINDOW_MANAGER.lock().get_layer(id).need_update();
+                        UpdateEvent::Id(id) => {
+                            if let Some(layer) = WINDOW_MANAGER.lock().get_layer(id) {
+                                layer.need_update();
+                                let area = layer.area();
+                                global_area = if let Some(a) = global_area {
+                                    Some(area.union(&a))
+                                } else {
+                                    Some(area)
+                                };
+                            }
                         }
-                        event::UpdateEvent::Area(area) => {
+                        UpdateEvent::Area(area) => {
                             global_area = if let Some(a) = global_area {
                                 Some(area.union(&a))
                             } else {
                                 Some(area)
                             };
                         }
-                        event::UpdateEvent::All => {
+                        UpdateEvent::All => {
                             let mut manager = WINDOW_MANAGER.lock();
-                            let area = manager.area();
-                            manager.update = true;
-                            global_area = Some(manager.area());
+                            // let area = manager.area();
+                            manager.request_global_update();
+                            // global_area = Some(manager.area());
                         }
                     }
                 }
@@ -736,11 +672,8 @@ fn process_window() {
 
 pub fn window_task() {
     loop {
-        let flag = process_mouse();
+        process_mouse();
         process_keyboard();
         process_window();
-        if flag {
-            // debug!("done!");
-        }
     }
 }

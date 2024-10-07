@@ -2,7 +2,9 @@ use keycode::{Key, KeySpecial};
 use log::debug;
 use usb::USBKeyboardDriver;
 
-use crate::{interrupt::without_interrupts, print, queue::ArrayQueue, sync::Mutex, task::schedule};
+use crate::{
+    collections::queue::Queue, interrupt::without_interrupts, print, sync::Mutex, task::schedule,
+};
 
 pub mod keycode;
 mod manager;
@@ -10,8 +12,9 @@ mod usb;
 
 const KEYBOARD_BUFFER_LENGTH: usize = 200;
 
-static QUEUE: Mutex<ArrayQueue<Key, KEYBOARD_BUFFER_LENGTH>> =
-    Mutex::new(ArrayQueue::new(Key::Special(KeySpecial::None)));
+static QUEUE: Mutex<Queue<[Key; KEYBOARD_BUFFER_LENGTH]>> = Mutex::new(Queue::new(
+    [Key::Special(KeySpecial::None); KEYBOARD_BUFFER_LENGTH],
+));
 
 pub struct Keyboard {}
 

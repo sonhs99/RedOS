@@ -36,6 +36,16 @@ dump:
 hdd:
 	qemu-img create hdd.img 20M
 
+img:
+	qemu-img create OS.img 200M
+	mkfs.fat -n 'OS' -s 2 -f 2 -R32 -F 32 OS.img
+	sudo mount OS.img mnt
+	sudo mkdir -p mnt/efi/boot
+	sudo cp esp/efi/boot/bootx64.efi mnt/efi/boot/bootx64.efi
+	sudo cp esp/ap_bootstrap.bin mnt/ap_bootstrap.bin
+	sudo cp esp/kernel.elf mnt/kernel.elf
+	sudo umount mnt
+
 debug:
 	$(QEMU) $(QEMU_USB) $(QEMU_DEBUG)
 

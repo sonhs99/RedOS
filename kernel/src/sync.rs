@@ -98,6 +98,7 @@ pub struct Mutex<T> {
     inner: UnsafeCell<T>,
     status: UnsafeCell<u8>,
     id: UnsafeCell<u8>,
+    count: UnsafeCell<u8>,
 }
 
 pub struct MutexGuard<'a, T> {
@@ -129,6 +130,7 @@ impl<T> Mutex<T> {
             inner: UnsafeCell::new(inner),
             status: UnsafeCell::new(0),
             id: UnsafeCell::new(0xFF),
+            count: UnsafeCell::new(0),
         }
     }
 
@@ -144,6 +146,8 @@ impl<T> Mutex<T> {
                         spin_loop();
                     }
                 }
+            } else {
+                unsafe { *self.count.get() += 1 };
             }
         }
 
@@ -178,10 +182,16 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        set_interrupt(false);
-        unsafe { *self.mutex.status.get() = 0 };
-        unsafe { *self.mutex.id.get() = 0xFF };
-        set_interrupt(self.interrupt);
+        unsafe {
+            if *self.mutex.count.get() == 0 {
+                set_interrupt(false);
+                unsafe { *self.mutex.status.get() = 0 };
+                unsafe { *self.mutex.id.get() = 0xFF };
+                set_interrupt(self.interrupt);
+            } else {
+                *self.mutex.count.get() -= 1;
+            }
+        }
     }
 }
 

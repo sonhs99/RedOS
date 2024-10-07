@@ -2,7 +2,7 @@ use core::ptr::{read_volatile, write_volatile};
 
 use log::debug;
 
-use crate::{sync::OnceLock, timer::wait_ms};
+use crate::{percpu::lapic_register_base, sync::OnceLock, timer::wait_ms};
 
 pub struct LocalAPICRegisters(u32);
 
@@ -38,7 +38,7 @@ impl LocalAPICRegisters {
 
 impl Default for LocalAPICRegisters {
     fn default() -> Self {
-        Self(0xFEE0_0000)
+        Self(lapic_register_base())
     }
 }
 

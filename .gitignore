@@ -3,5 +3,6 @@
 dump.txt
 debug.txt
 hdd.img
+OS.img
 OVMF_CODE.fd
 OVMF_VARS.fd

@@ -13,7 +13,7 @@ use kernel::window::component::Button;
 use kernel::window::draw::{draw_rect, draw_str, Point};
 use kernel::window::event::{EventType, WindowEvent};
 use kernel::window::frame::WindowFrame;
-use kernel::window::{create_window, init_window, window_task, Drawable};
+use kernel::window::{create_window, init_window, window_task, Drawable, Writable};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -79,13 +79,7 @@ fn kernel_main(boot_info: BootInfo) {
     init_heap(&boot_info.memory_map);
     info!("Heap Initialized");
 
-    init_window((width, height));
-    let writer = WindowFrame::new_pos(0, 19, 640, 400, "Log");
-    alloc_window(writer);
-    info!("Window Manager Initialized");
-
     init_task();
-    create_task(TaskFlags::new(), None, window_task as u64, 0, 0);
     info!("Task Management Initialized");
 
     init_fs();
@@ -96,6 +90,13 @@ fn kernel_main(boot_info: BootInfo) {
     format_by_name("ram0", 8 * 1024 * 1024, false);
     info!("RAM Disk Mounted");
 
+    init_window((width, height));
+    create_task("window", TaskFlags::new(), None, window_task as u64, 0, 0);
+    let mut writer = WindowFrame::new_pos(0, 19, 640, 400, "Log");
+    writer.set_background(PixelColor::Black);
+    alloc_window(writer);
+    info!("Window Manager Initialized");
+
     // Do Not Use
     // set_ts();
     // info!("Lazy FP Enable");
@@ -104,7 +105,7 @@ fn kernel_main(boot_info: BootInfo) {
     info!("ACPI Initialized");
 
     let num_core = ioapic::init();
-    percpu::init(num_core);
+    percpu::init(num_core, 0xFEE0_0000);
     info!("I/O APIC Initialized");
     info!("Number Of Core: {num_core}");
 
@@ -254,6 +255,7 @@ fn kernel_main(boot_info: BootInfo) {
     }
 
     init_routing_table(msi_vector);
+    // create_task("ThreadTest", TaskFlags::new(), None, test as u64, 0, 0);
     idle_task();
 }
 
@@ -419,33 +421,34 @@ fn test_fs() {
 }
 
 fn test() {
-    for i in 0..50 {
+    for i in 0..10 {
         create_task(
-            TaskFlags::new().thread().set_priority(66).clone(),
+            "test",
+            TaskFlags::new().thread().set_priority(0).clone(),
             None,
             test_thread as u64,
             0,
             0,
         );
     }
-    for i in 0..50 {
-        create_task(
-            TaskFlags::new().thread().set_priority(130).clone(),
-            None,
-            test_thread as u64,
-            0,
-            0,
-        );
-    }
-    for i in 0..50 {
-        create_task(
-            TaskFlags::new().thread().set_priority(200).clone(),
-            None,
-            test_thread as u64,
-            0,
-            0,
-        );
-    }
+    // for i in 0..50 {
+    //     create_task(
+    //         TaskFlags::new().thread().set_priority(130).clone(),
+    //         None,
+    //         test_thread as u64,
+    //         0,
+    //         0,
+    //     );
+    // }
+    // for i in 0..50 {
+    //     create_task(
+    //         TaskFlags::new().thread().set_priority(200).clone(),
+    //         None,
+    //         test_thread as u64,
+    //         0,
+    //         0,
+    //     );
+    // }
     loop {
         schedule();
     }
@@ -480,12 +483,13 @@ fn test_thread() {
     let mut value1 = 1f64;
     let mut value2 = 1f64;
 
-    let data = [b'-', b'\\', b'|', b'/'];
+    let data = ["-", "\\", "|", "/"];
     let mut count = 0;
 
     let mut writer = create_window(8, 16);
+    let mut fail = false;
 
-    loop {
+    for _ in 0..1000 {
         random = random * 1103515245 + 12345;
         random = (random >> 16) & 0xFFFF_FFFF;
         let factor = random % 255;
@@ -494,6 +498,7 @@ fn test_thread() {
         value2 *= factor;
 
         if value1 != value2 {
+            fail = true;
             break;
         }
 
@@ -501,29 +506,37 @@ fn test_thread() {
         value2 /= factor;
 
         if value1 != value2 {
+            fail = true;
             break;
         }
 
-        write_ascii(
-            0,
-            0,
+        draw_str(
+            Point(0, 0),
             data[count],
             PixelColor::Red,
-            Some(PixelColor::Black),
+            PixelColor::Black,
             &mut writer,
         );
         // render();
         count = (count + 1) % 4;
     }
-    write_ascii(
-        0,
-        0,
-        b' ',
-        PixelColor::Red,
-        Some(PixelColor::White),
-        &mut writer,
-    );
-    info!("Thread id={id}: FPU Test Failed -> left={value1}, right={value2}");
+    // draw_str(
+    //     Point(0, 0),
+    //     " ",
+    //     PixelColor::Red,
+    //     PixelColor::White,
+    //     &mut writer,
+    // );
+    if fail {
+        info!("Thread id={id}: FPU Test Failed -> left={value1}, right={value2}");
+    } else {
+        info!(
+            "Thread id={}: Test End, Window id={}",
+            id,
+            writer.write_id().unwrap()
+        );
+    }
+    writer.close();
 }
 
 fn test_windmill() {

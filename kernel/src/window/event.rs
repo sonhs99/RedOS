@@ -46,6 +46,7 @@ pub enum KeyEvent {
 pub enum UpdateEvent {
     Id(usize),
     Area(Area),
+    // Remove(usize),
     All,
 }
 

@@ -9,15 +9,15 @@ use rr::RoundRobinScheduler;
 use super::Task;
 
 pub trait Schedulable {
-    fn running_task(&mut self) -> Option<NonNull<Task>>;
+    fn running_task(&mut self) -> Option<&'static mut Task>;
     fn set_running_task(&mut self, task: &mut Task);
 
-    fn next_task(&mut self) -> Option<NonNull<Task>>;
+    fn next_task(&mut self) -> Option<&'static mut Task>;
     fn push_task(&mut self, task: &mut Task);
     fn load(&self, task: &Task) -> usize;
 
     // Wait Queue
-    fn next_wait(&mut self) -> Option<NonNull<Task>>;
+    fn next_wait(&mut self) -> Option<&'static mut Task>;
     fn push_wait(&mut self, task: &mut Task);
 
     // Priority

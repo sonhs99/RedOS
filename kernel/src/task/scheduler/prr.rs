@@ -3,7 +3,7 @@ use x86_64::instructions::interrupts::without_interrupts;
 
 use super::Schedulable;
 use crate::{
-    queue::ListQueue,
+    collections::queue::RefQueue,
     task::{Task, TASK_MANAGER},
 };
 use core::ptr::NonNull;
@@ -14,8 +14,8 @@ const PRIORITY_SIZE: usize = u8::MAX as usize / NUM_OF_PRIORITY + 1;
 
 pub struct PriorityRoundRobinScheduler {
     running: Option<NonNull<Task>>,
-    queues: [ListQueue<Task>; NUM_OF_PRIORITY],
-    wait: ListQueue<Task>,
+    queues: [RefQueue<Task>; NUM_OF_PRIORITY],
+    wait: RefQueue<Task>,
     execute: [usize; NUM_OF_PRIORITY],
     process_count: u64,
     current_execute: usize,
@@ -25,8 +25,8 @@ impl PriorityRoundRobinScheduler {
     pub fn new() -> Self {
         Self {
             running: None,
-            queues: [const { ListQueue::new() }; NUM_OF_PRIORITY],
-            wait: ListQueue::new(),
+            queues: [const { RefQueue::new() }; NUM_OF_PRIORITY],
+            wait: RefQueue::new(),
             execute: [0; NUM_OF_PRIORITY],
             process_count: PROCESSTIME_COUNT,
             current_execute: 0,
@@ -39,14 +39,14 @@ impl PriorityRoundRobinScheduler {
 }
 
 impl Schedulable for PriorityRoundRobinScheduler {
-    fn running_task(&mut self) -> Option<NonNull<Task>> {
-        self.running
+    fn running_task(&mut self) -> Option<&'static mut Task> {
+        unsafe { self.running.map(|mut task| task.as_mut()) }
     }
     fn set_running_task(&mut self, task: &mut Task) {
         self.running = NonNull::new(task)
     }
 
-    fn next_task(&mut self) -> Option<NonNull<Task>> {
+    fn next_task(&mut self) -> Option<&'static mut Task> {
         for _ in 0..2 {
             for priority in 0..NUM_OF_PRIORITY {
                 if self.execute[priority] < self.queues[priority].length() {
@@ -61,9 +61,9 @@ impl Schedulable for PriorityRoundRobinScheduler {
     }
 
     fn push_task(&mut self, task: &mut Task) {
-        let priority = task.flags.priority();
+        let priority = task.flags().priority();
         let queue_idx = Self::get_priority(priority);
-        self.queues[queue_idx].push(NonNull::new(task).unwrap());
+        self.queues[queue_idx].push(task);
     }
 
     fn tick(&mut self) {
@@ -81,11 +81,11 @@ impl Schedulable for PriorityRoundRobinScheduler {
     }
 
     fn push_wait(&mut self, task: &mut Task) {
-        self.wait.push(NonNull::new(task).unwrap());
+        self.wait.push(task);
         // debug!("wait = {} push", self.wait.length());
     }
 
-    fn next_wait(&mut self) -> Option<NonNull<Task>> {
+    fn next_wait(&mut self) -> Option<&'static mut Task> {
         let task = self.wait.pop();
         // debug!("wait = {} pop", self.wait.length());
         task
@@ -95,23 +95,27 @@ impl Schedulable for PriorityRoundRobinScheduler {
         without_interrupts(|| {
             let mut manager = TASK_MANAGER.lock();
             let task = manager.get(id).ok_or(())?;
-            if unsafe { self.running.unwrap().as_mut() }.id != id {
+            if unsafe { self.running.unwrap().as_mut().id() } != id {
                 self.remove_task(task);
             }
-            task.flags.set_priority(priority);
+            task.flags_mut().set_priority(priority);
             Ok(())
         })
     }
 
     fn remove_task(&mut self, task: &mut Task) -> Result<(), ()> {
-        let priority = task.flags.priority();
+        let priority = task.flags().priority();
         let queue_idx = Self::get_priority(priority);
-        self.queues[queue_idx].remove(NonNull::new(task).ok_or(())?);
+        let mut node = self.queues[queue_idx]
+            .iter()
+            .find(|curser| unsafe { curser.data().unwrap().as_ref().id() == task.id() })
+            .ok_or(())?;
+        node.remove();
         Ok(())
     }
 
     fn load(&self, task: &Task) -> usize {
-        let priority = Self::get_priority(task.flags.priority());
+        let priority = Self::get_priority(task.flags().priority());
         self.queues[priority].length()
     }
 }
