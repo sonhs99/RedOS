@@ -1,5 +1,6 @@
 *target
 /esp
+/img
 dump.txt
 debug.txt
 hdd.img

@@ -8,7 +8,7 @@ QEMU_USB := -device qemu-xhci \
     -device usb-kbd \
     -device usb-mouse \
 
-QEMU_TRACE := -d trace:cpu_reset
+QEMU_TRACE := --trace "usb_xhci*"
 
 QEMU_DEBUG := -S -gdb tcp::9000
 
@@ -36,6 +36,7 @@ dump:
 hdd:
 	qemu-img create hdd.img 20M
 
+.PHONY: img
 img:
 	qemu-img create OS.img 200M
 	mkfs.fat -n 'OS' -s 2 -f 2 -R32 -F 32 OS.img

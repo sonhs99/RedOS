@@ -134,7 +134,7 @@ impl Iterator for MADTIter {
     fn next(&mut self) -> Option<Self::Item> {
         let header = unsafe { &*self.base.add(self.idx as usize).cast::<MADTHeader>() };
         let endpoint = self.idx + header.length as u32;
-        if endpoint >= self.length {
+        if endpoint >= self.length || endpoint == self.idx {
             return None;
         }
         self.idx = endpoint;
@@ -223,6 +223,9 @@ pub fn initialize(rsdp: &RSDP) {
     }
     if let Some(madt) = xsdt.entries().find(|entry| entry.is_valid(b"APIC")) {
         MADT_CELL.get_or_init(|| unsafe { &*(madt as *const DescriptionHeader).cast::<MADT>() });
+        debug!("MADT Length={}", unsafe {
+            read_unaligned(addr_of!(madt.length))
+        });
     } else {
         debug!("MADT is not found");
     }

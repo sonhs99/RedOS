@@ -12,7 +12,7 @@ use super::{
     ring::TransferRing,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum DriverType {
     Keyboard,
     Mouse,

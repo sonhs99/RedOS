@@ -1,12 +1,15 @@
 use super::{Context, FPUContext, Task};
-use crate::{allocator::malloc, collections::queue::RefQueue};
+use crate::{
+    allocator::malloc,
+    collections::{list::RawNode, queue::RawQueue},
+};
 use alloc::collections::BTreeMap;
 use core::ptr::NonNull;
 use log::debug;
 
 const TASKPOOL_SIZE: usize = 1024;
 pub struct TaskManager {
-    empty_queue: RefQueue<Task>,
+    empty_queue: RawQueue<Task>,
     task_map: BTreeMap<u64, NonNull<Task>>,
     max_count: usize,
     use_count: usize,
@@ -16,7 +19,7 @@ pub struct TaskManager {
 impl TaskManager {
     pub fn new() -> Self {
         Self {
-            empty_queue: RefQueue::new(),
+            empty_queue: RawQueue::new(),
             task_map: BTreeMap::new(),
             use_count: 0,
             alloc_count: 0,
@@ -56,6 +59,8 @@ impl TaskManager {
         task.set_parent(None);
         task.set_child(None);
         task.set_sibling(None);
+        task.set_prev(None);
+        task.set_next(None);
         *task.context() = Context::empty();
         *task.fpu_context() = FPUContext::new();
 

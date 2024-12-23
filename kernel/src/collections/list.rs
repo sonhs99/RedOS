@@ -256,3 +256,102 @@ impl<T> Iterator for CurserIter<T> {
         Some(before)
     }
 }
+
+pub trait RawNode {
+    fn prev(&self) -> Option<&mut Self>;
+    fn next(&self) -> Option<&mut Self>;
+    fn set_prev(&mut self, node: Option<&mut Self>);
+    fn set_next(&mut self, node: Option<&mut Self>);
+
+    fn insert_prev(&mut self, node: &mut Self) {
+        node.set_prev(self.prev());
+        node.set_next(Some(self));
+        self.set_prev(Some(node));
+    }
+
+    fn insert_next(&mut self, node: &mut Self) {
+        node.set_next(self.next());
+        node.set_prev(Some(self));
+        self.set_next(Some(node));
+    }
+
+    fn remove(&mut self) {
+        if let Some(prev) = self.prev() {
+            prev.set_next(self.next());
+        }
+        if let Some(next) = self.next() {
+            next.set_prev(self.prev());
+        }
+        self.set_prev(None);
+        self.set_next(None);
+    }
+}
+
+pub struct RawList<T: RawNode> {
+    head: Option<NonNull<T>>,
+    tail: Option<NonNull<T>>,
+    lenght: usize,
+}
+
+impl<T: RawNode> RawList<T> {
+    pub const fn empty() -> Self {
+        Self {
+            head: None,
+            tail: None,
+            lenght: 0,
+        }
+    }
+
+    pub fn push(&mut self, data: &mut T) {
+        self.lenght += 1;
+        let head = self.head;
+        self.head = NonNull::new(data);
+
+        if let Some(mut head_ptr) = head {
+            let head = unsafe { head_ptr.as_mut() };
+            data.insert_next(head);
+        } else {
+            self.tail = self.head;
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<&'static mut T> {
+        if let Some(mut tail_ptr) = self.tail {
+            let tail = unsafe { tail_ptr.as_mut() };
+            self.tail = tail.prev().map(|task| NonNull::new(task).unwrap());
+            tail.remove();
+            self.lenght -= 1;
+
+            if self.tail.is_none() {
+                self.head = None;
+            }
+            Some(tail)
+        } else {
+            None
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.lenght
+    }
+
+    pub fn iter(&self) -> RawListIter<T> {
+        RawListIter(self.head)
+    }
+}
+
+pub struct RawListIter<T: RawNode>(Option<NonNull<T>>);
+
+impl<T: RawNode + 'static> Iterator for RawListIter<T> {
+    type Item = &'static mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(mut data_ptr) = self.0 {
+            let data = unsafe { data_ptr.as_mut() };
+            self.0 = data.next().map(|next| NonNull::new(next).unwrap());
+            Some(data)
+        } else {
+            None
+        }
+    }
+}

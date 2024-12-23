@@ -7,6 +7,7 @@ use super::{
     create_window, create_window_pos,
     draw::{draw_line, draw_rect, draw_str, Point},
     event::Event,
+    request_update_by_id,
     writer::PartialWriter,
     Area, Drawable, Movable, WindowWriter, Writable,
 };
@@ -212,6 +213,8 @@ impl WindowFrame {
 
         writer.set_button(Area::new(width - 20, 1, 18, 18));
         writer.set_title(Area::new(0, 6, width - 2, 18));
+
+        request_update_by_id(writer.0.lock().id);
 
         Self {
             writer,

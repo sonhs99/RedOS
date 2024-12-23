@@ -6,15 +6,16 @@ use crate::{
     interrupt::{apic::LocalAPICRegisters, without_interrupts},
     sync::{Mark, Mutex, OnceLock},
     window::{
-        draw::{draw_rect, Point},
+        draw::{draw_rect, draw_str, Point},
         frame::WindowFrame,
         request_update_by_id, Movable, WindowWriter,
     },
 };
 
+use alloc::string::ToString;
 use log::{Level, Log};
 
-pub static CONSOLE: OnceLock<Mark<Mutex<Console>>> = OnceLock::new();
+pub static CONSOLE: OnceLock<Mutex<Console>> = OnceLock::new();
 static WINDOW_WRITER: OnceLock<Mutex<WindowFrame>> = OnceLock::new();
 pub static LOGGER: ConsoleLogger = ConsoleLogger;
 
@@ -58,12 +59,14 @@ impl Console {
                     self.newline();
                 }
                 match WINDOW_WRITER.get() {
-                    Some(writer) => write_ascii(
-                        8 * self.cursor_column,
-                        16 * self.cursor_row,
-                        c,
+                    Some(writer) => draw_str(
+                        Point(
+                            8 * self.cursor_column as usize,
+                            16 * self.cursor_row as usize,
+                        ),
+                        (c as char).to_string().as_str(),
                         self.fg_color,
-                        Some(self.bg_color),
+                        self.bg_color,
                         &mut writer.lock().body(),
                     ),
                     None => write_ascii(
@@ -83,7 +86,7 @@ impl Console {
 
     pub fn cls(&mut self) {
         for y in 0..self.cursor_row {
-            self.buffer[y as usize] = [0u8; Console::Columns];
+            self.buffer[y as usize].fill(0);
         }
         for x in 0..self.cursor_column {
             self.buffer[self.cursor_row as usize][x as usize] = 0;
@@ -207,13 +210,13 @@ impl fmt::Write for PanicConsole {
 }
 
 pub fn init_console(bg_color: PixelColor, fg_color: PixelColor) {
-    CONSOLE.get_or_init(|| Mark::new(Mutex::new(Console::new(bg_color, fg_color))));
+    CONSOLE.get_or_init(|| Mutex::new(Console::new(bg_color, fg_color)));
     let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(log::LevelFilter::Debug));
 }
 
 pub fn alloc_window(writer: WindowFrame) {
     WINDOW_WRITER.get_or_init(|| Mutex::new(writer));
-    CONSOLE.skip().lock().cls();
+    CONSOLE.lock().cls();
 }
 
 #[macro_export]
@@ -240,17 +243,12 @@ impl Log for ConsoleLogger {
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             let apic_id = LocalAPICRegisters::default().local_apic_id().id();
-            println!(
-                "[{:>5}: core={}]: {}",
-                record.level(),
-                apic_id,
-                record.args()
-            );
+            println!("[{:>5}:{:2}]: {}", record.level(), apic_id, record.args());
         }
     }
 
     fn flush(&self) {
-        CONSOLE.skip().lock().cls();
+        CONSOLE.lock().cls();
     }
 }
 
@@ -258,12 +256,12 @@ impl Log for ConsoleLogger {
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
     {
-        CONSOLE.skip().lock().write_fmt(args).unwrap();
+        CONSOLE.lock().write_fmt(args).unwrap();
     }
-    if let Some(writer) = WINDOW_WRITER.get() {
-        let id = writer.lock().window_id();
-        request_update_by_id(id);
-    }
+    // if let Some(writer) = WINDOW_WRITER.get() {
+    //     let id = writer.lock().window_id();
+    //     request_update_by_id(id);
+    // }
 }
 
 #[doc(hidden)]

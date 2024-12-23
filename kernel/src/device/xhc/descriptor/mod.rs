@@ -1,6 +1,7 @@
 use core::mem::size_of;
 
 use alloc::{boxed::Box, vec::Vec};
+use log::debug;
 use structure::{
     ConfigurationDescriptor, EndpointDescriptor, HidDescriptor, InterfaceDescriptor,
     CONFIGURATION_DESCRIPTOR_TYPE, ENDPOINT_DESCRIPTOR_TYPE, HID_DESCRIPTOR_TYPE,
@@ -107,6 +108,7 @@ impl HidDeviceDescriptors {
         let driver_type = self.interface.driver_type();
         for driver in drivers.iter() {
             if driver.driver_type() == driver_type {
+                debug!("[XHCI]: {driver_type:?} Found");
                 return Some(driver.clone());
             }
         }

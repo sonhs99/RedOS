@@ -2,7 +2,7 @@ use crate::device::driver::{keyboard::keycode::Key, mouse::MouseState};
 
 use super::Area;
 
-pub const EVENT_QUEUE_SIZE: usize = 20;
+pub const EVENT_QUEUE_SIZE: usize = 40;
 
 #[derive(Clone, Copy)]
 pub enum DestId {

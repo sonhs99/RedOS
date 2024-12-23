@@ -2,6 +2,7 @@ use alloc::vec;
 use alloc::{sync::Arc, vec::Vec};
 use log::debug;
 
+use crate::task::running_task;
 use crate::{
     graphic::{get_graphic, PixelColor},
     sync::Mutex,

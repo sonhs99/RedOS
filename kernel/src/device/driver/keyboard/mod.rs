@@ -1,13 +1,13 @@
 use keycode::{Key, KeySpecial};
 use log::debug;
+use ps2::PS2KeyboardDriver;
 use usb::USBKeyboardDriver;
 
-use crate::{
-    collections::queue::Queue, interrupt::without_interrupts, print, sync::Mutex, task::schedule,
-};
+use crate::{collections::queue::Queue, print, sync::Mutex, task::schedule};
 
 pub mod keycode;
 mod manager;
+pub mod ps2;
 mod usb;
 
 const KEYBOARD_BUFFER_LENGTH: usize = 200;
@@ -24,8 +24,18 @@ impl Keyboard {
     }
 
     pub fn usb(&self) -> USBKeyboardDriver {
-        USBKeyboardDriver::new(|byte, key| unsafe {
+        USBKeyboardDriver::new(|byte, key| {
+            // debug!("Keyboard key={key:?}");
             QUEUE.lock().enqueue(key);
+        })
+    }
+
+    pub fn ps2(&self) -> PS2KeyboardDriver {
+        PS2KeyboardDriver::new(|key, pressed| {
+            // debug!("Keyboard key={key:?}");
+            if pressed {
+                QUEUE.lock().enqueue(key);
+            }
         })
     }
 }

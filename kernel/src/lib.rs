@@ -24,6 +24,7 @@ pub mod interrupt;
 pub mod ioapic;
 pub mod page;
 pub mod percpu;
+pub mod shell;
 mod sync;
 pub mod task;
 pub mod timer;

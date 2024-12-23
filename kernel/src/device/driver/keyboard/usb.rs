@@ -1,10 +1,10 @@
 use super::{
-    keycode::{Key, KeyMappingEntry, KeySpecial},
+    keycode::{Key, KeyMappingEntry, KeySpecial, Keycode},
     manager::KeyboardManager,
 };
 use crate::device::xhc::driver::{ClassDriverOperate, DriverType};
 use alloc::{rc::Rc, vec::Vec};
-use log::error;
+use log::{debug, error};
 
 const COMBINE_KEY_LSHIFT: u8 = 0b0000_0010;
 const COMBINE_KEY_RSHIFT: u8 = 0b0010_0000;
@@ -66,7 +66,11 @@ const KEY_MAPPING_TABLE: [KeyMappingEntry; 103] = [
     /*  037  */ KeyMappingEntry::new(Key::Ascii(b'8'), Key::Ascii(b'*')),
     /*  038  */ KeyMappingEntry::new(Key::Ascii(b'9'), Key::Ascii(b'(')),
     /*  039  */ KeyMappingEntry::new(Key::Ascii(b'0'), Key::Ascii(b')')),
-    /*  040  */ KeyMappingEntry::new(Key::Ascii(b'\n'), Key::Ascii(b'\n')),
+    /*  040  */
+    KeyMappingEntry::new(
+        Key::Special(KeySpecial::Enter),
+        Key::Special(KeySpecial::Enter),
+    ),
     /*  041  */
     KeyMappingEntry::new(Key::Special(KeySpecial::Esc), Key::Special(KeySpecial::Esc)),
     /*  042  */
@@ -187,7 +191,11 @@ const KEY_MAPPING_TABLE: [KeyMappingEntry; 103] = [
     /*  086  */ KeyMappingEntry::new(Key::Ascii(b'*'), Key::Ascii(b'*')),
     /*  087  */ KeyMappingEntry::new(Key::Ascii(b'-'), Key::Ascii(b'-')),
     /*  088  */ KeyMappingEntry::new(Key::Ascii(b'+'), Key::Ascii(b'+')),
-    /*  089  */ KeyMappingEntry::new(Key::Ascii(b'\n'), Key::Ascii(b'\n')),
+    /*  089  */
+    KeyMappingEntry::new(
+        Key::Special(KeySpecial::Enter),
+        Key::Special(KeySpecial::Enter),
+    ),
     /*  090  */ KeyMappingEntry::new(Key::Ascii(b'1'), Key::Special(KeySpecial::End)),
     /*  091  */ KeyMappingEntry::new(Key::Ascii(b'2'), Key::Special(KeySpecial::Down)),
     /*  092  */ KeyMappingEntry::new(Key::Ascii(b'3'), Key::Special(KeySpecial::PageDown)),
@@ -211,6 +219,23 @@ const KEY_MAPPING_TABLE: [KeyMappingEntry; 103] = [
     ),
     /*  103  */ KeyMappingEntry::new(Key::Ascii(b'='), Key::Ascii(b'=')),
 ];
+
+#[derive(Clone, Copy)]
+pub struct USBKeycode(u8);
+
+impl Keycode for USBKeycode {
+    fn is_alpha(&self) -> bool {
+        self.0 >= 0x04 && self.0 <= 0x1D
+    }
+
+    fn is_common_num(&self) -> bool {
+        self.0 >= 0x1E && self.0 <= 0x27
+    }
+
+    fn is_num_pad(&self) -> bool {
+        self.0 >= 0x59 && self.0 <= 0x63
+    }
+}
 
 trait KeyboardSubscriber {
     fn subscribe(&self, modified_bit: u8, keycode: Key);
@@ -264,7 +289,9 @@ impl USBKeyboardDriver {
             Some(entry) => {
                 let shift_pressed =
                     self.data_buff[0] & (COMBINE_KEY_LSHIFT | COMBINE_KEY_RSHIFT) != 0;
-                let keyboard_status = self.manager.is_combined_code(keycode, shift_pressed);
+                let keyboard_status = self
+                    .manager
+                    .is_combined_code(USBKeycode(keycode), shift_pressed);
                 if keyboard_status {
                     entry.combined()
                 } else {
@@ -278,6 +305,7 @@ impl USBKeyboardDriver {
 
 impl ClassDriverOperate for USBKeyboardDriver {
     fn on_data_received(&mut self) -> Result<(), ()> {
+        // debug!("Keyboard");
         for key in self.keycodes().iter() {
             self.manager.update_key_status(key);
             self.subsrcribe.subscribe(self.data_buff[0], *key);

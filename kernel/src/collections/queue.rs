@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::list::{CurserIter, List};
+use super::list::{CurserIter, List, RawList, RawListIter, RawNode};
 use super::Length;
 
 pub struct Queue<T: Length> {
@@ -88,5 +88,29 @@ impl<T> RefQueue<T> {
 
     pub fn iter(&mut self) -> CurserIter<NonNull<T>> {
         self.list.iter()
+    }
+}
+
+pub struct RawQueue<T: RawNode>(RawList<T>);
+
+impl<T: RawNode> RawQueue<T> {
+    pub const fn new() -> Self {
+        Self(RawList::empty())
+    }
+
+    pub fn push(&mut self, data: &mut T) {
+        self.0.push(data);
+    }
+
+    pub fn pop(&mut self) -> Option<&'static mut T> {
+        self.0.pop()
+    }
+
+    pub const fn length(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn iter(&self) -> RawListIter<T> {
+        self.iter()
     }
 }

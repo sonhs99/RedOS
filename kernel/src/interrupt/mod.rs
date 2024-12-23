@@ -16,6 +16,8 @@ pub use asm::{set_interrupt, without_interrupts};
 
 #[repr(u8)]
 pub enum InterruptVector {
+    PS2Keyboard = 0x21,
+    PS2Mouse = 0x2C,
     PATA1 = 0x2E,
     PATA2 = 0x2F,
     XHCI = 0x40,
@@ -59,6 +61,17 @@ pub fn init_idt() {
             .set_option(option);
         idt.set_handler(14, handler_with_err_code!(page_fault))
             .set_option(option);
+
+        idt.set_handler(
+            InterruptVector::PS2Keyboard as u8,
+            handler_without_err_code!(ps2_keyboard_handler),
+        )
+        .set_option(option);
+        idt.set_handler(
+            InterruptVector::PS2Mouse as u8,
+            handler_without_err_code!(ps2_mouse_handler),
+        )
+        .set_option(option);
 
         idt.set_handler(
             InterruptVector::PATA1 as u8,

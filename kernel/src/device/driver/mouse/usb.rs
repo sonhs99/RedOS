@@ -1,4 +1,5 @@
 use alloc::rc::Rc;
+use log::debug;
 
 use crate::device::xhc::driver::{ClassDriverOperate, DriverType};
 
@@ -19,7 +20,7 @@ where
 pub struct USBMouseDriver {
     prev_state: u8,
     buffer: [i8; 4],
-    subsrcribe: Rc<dyn MouseSubscriber>,
+    subscribe: Rc<dyn MouseSubscriber>,
 }
 
 impl USBMouseDriver {
@@ -30,17 +31,18 @@ impl USBMouseDriver {
         Self {
             prev_state: 0,
             buffer: [0i8; 4],
-            subsrcribe: Rc::new(subscribe),
+            subscribe: Rc::new(subscribe),
         }
     }
 }
 
 impl ClassDriverOperate for USBMouseDriver {
     fn on_data_received(&mut self) -> Result<(), ()> {
+        // debug!("Mouse");
         let state = self.buffer[0] as u8;
         let pressed = !self.prev_state & state;
         let released = self.prev_state & !state;
-        self.subsrcribe.subscribe(
+        self.subscribe.subscribe(
             pressed,
             released,
             self.buffer[1],

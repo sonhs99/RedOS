@@ -1,9 +1,10 @@
+use alloc::vec::Vec;
 use log::debug;
 use x86_64::instructions::interrupts::without_interrupts;
 
 use super::Schedulable;
 use crate::{
-    collections::queue::RefQueue,
+    collections::{list::RawNode, queue::RawQueue},
     task::{Task, TASK_MANAGER},
 };
 use core::ptr::NonNull;
@@ -14,8 +15,8 @@ const PRIORITY_SIZE: usize = u8::MAX as usize / NUM_OF_PRIORITY + 1;
 
 pub struct PriorityRoundRobinScheduler {
     running: Option<NonNull<Task>>,
-    queues: [RefQueue<Task>; NUM_OF_PRIORITY],
-    wait: RefQueue<Task>,
+    queues: [RawQueue<Task>; NUM_OF_PRIORITY],
+    wait: RawQueue<Task>,
     execute: [usize; NUM_OF_PRIORITY],
     process_count: u64,
     current_execute: usize,
@@ -25,8 +26,8 @@ impl PriorityRoundRobinScheduler {
     pub fn new() -> Self {
         Self {
             running: None,
-            queues: [const { RefQueue::new() }; NUM_OF_PRIORITY],
-            wait: RefQueue::new(),
+            queues: [const { RawQueue::new() }; NUM_OF_PRIORITY],
+            wait: RawQueue::new(),
             execute: [0; NUM_OF_PRIORITY],
             process_count: PROCESSTIME_COUNT,
             current_execute: 0,
@@ -99,6 +100,7 @@ impl Schedulable for PriorityRoundRobinScheduler {
                 self.remove_task(task);
             }
             task.flags_mut().set_priority(priority);
+            self.push_task(task);
             Ok(())
         })
     }
@@ -108,7 +110,7 @@ impl Schedulable for PriorityRoundRobinScheduler {
         let queue_idx = Self::get_priority(priority);
         let mut node = self.queues[queue_idx]
             .iter()
-            .find(|curser| unsafe { curser.data().unwrap().as_ref().id() == task.id() })
+            .find(|t| unsafe { t.id() == task.id() })
             .ok_or(())?;
         node.remove();
         Ok(())

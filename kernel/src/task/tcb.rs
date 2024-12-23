@@ -3,6 +3,7 @@ use core::ptr::NonNull;
 use alloc::string::{String, ToString};
 
 use crate::{
+    collections::list::RawNode,
     float::{fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
 };
@@ -66,6 +67,9 @@ pub struct Task {
     id: u64,
     flags: TaskFlags,
 
+    prev: Option<NonNull<Task>>,
+    next: Option<NonNull<Task>>,
+
     parent: Option<NonNull<Task>>,
     child: Option<NonNull<Task>>,
     sibling: Option<NonNull<Task>>,
@@ -125,6 +129,8 @@ impl Task {
             parent: None,
             child: None,
             sibling: None,
+            prev: None,
+            next: None,
             memory_addr,
             memory_size,
             apic_id,
@@ -192,15 +198,16 @@ impl Task {
     }
 
     pub fn child(&self) -> Option<&'static mut Task> {
-        self.child.map(|mut task| unsafe { task.as_mut() })
+        self.child.map(|mut task_ptr| unsafe { task_ptr.as_mut() })
     }
 
     pub fn sibling(&self) -> Option<&'static mut Task> {
-        self.sibling.map(|mut task| unsafe { task.as_mut() })
+        self.sibling
+            .map(|mut task_ptr| unsafe { task_ptr.as_mut() })
     }
 
     pub fn parent(&self) -> Option<&'static mut Task> {
-        self.parent.map(|mut task| unsafe { task.as_mut() })
+        self.parent.map(|mut task_ptr| unsafe { task_ptr.as_mut() })
     }
 
     pub fn set_child(&mut self, task: Option<&Task>) {
@@ -224,6 +231,24 @@ impl Task {
 
     pub fn set_name(&mut self, name: &str) {
         self.name = name.to_string()
+    }
+}
+
+impl RawNode for Task {
+    fn prev(&self) -> Option<&mut Self> {
+        self.prev.map(|mut task_ptr| unsafe { task_ptr.as_mut() })
+    }
+
+    fn next(&self) -> Option<&mut Self> {
+        self.next.map(|mut task_ptr| unsafe { task_ptr.as_mut() })
+    }
+
+    fn set_prev(&mut self, task: Option<&mut Self>) {
+        self.prev = task.map(|task| NonNull::new(task as *const Task as u64 as *mut Task).unwrap());
+    }
+
+    fn set_next(&mut self, task: Option<&mut Self>) {
+        self.next = task.map(|task| NonNull::new(task as *const Task as u64 as *mut Task).unwrap());
     }
 }
 

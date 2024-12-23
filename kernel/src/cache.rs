@@ -74,7 +74,7 @@ impl<T: Clone + Default + 'static> Cache<T> {
             let node = unsafe { curser.data().ok_or(())?.as_mut() };
             if node.tag == tag {
                 node.dirty = true;
-                debug!("[CACHE] write tag={}", node.tag);
+                // debug!("[CACHE] write tag={}", node.tag);
                 node.data.clone_from(value);
 
                 curser.remove();
@@ -98,7 +98,7 @@ impl<T: Clone + Default + 'static> Cache<T> {
             burst_fn(new_cache.tag, &new_cache.data);
         }
 
-        debug!("[CACHE] alloc tag={}", tag);
+        // debug!("[CACHE] alloc tag={}", tag);
 
         new_cache.dirty = false;
         new_cache.tag = tag;

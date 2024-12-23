@@ -134,6 +134,7 @@ impl<T> Mutex<T> {
         }
     }
 
+    #[inline(always)]
     pub fn lock(&self) -> MutexGuard<T> {
         let previous = set_interrupt(false);
         let apic_id = LocalAPICRegisters::default().local_apic_id().id();

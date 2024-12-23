@@ -1,13 +1,16 @@
 use super::Schedulable;
-use crate::{collections::queue::RefQueue, task::Task};
+use crate::{
+    collections::{list::RawNode, queue::RawQueue},
+    task::Task,
+};
 use core::{ops::Deref, ptr::NonNull};
 
 const PROCESSTIME_COUNT: u64 = 0x2;
 
 pub struct RoundRobinScheduler {
     running: Option<NonNull<Task>>,
-    queue: RefQueue<Task>,
-    wait: RefQueue<Task>,
+    queue: RawQueue<Task>,
+    wait: RawQueue<Task>,
     process_count: u64,
 }
 
@@ -15,8 +18,8 @@ impl RoundRobinScheduler {
     pub fn new() -> Self {
         Self {
             running: None,
-            queue: RefQueue::new(),
-            wait: RefQueue::new(),
+            queue: RawQueue::new(),
+            wait: RawQueue::new(),
             process_count: PROCESSTIME_COUNT,
         }
     }
@@ -68,7 +71,7 @@ impl Schedulable for RoundRobinScheduler {
         let mut res = self
             .queue
             .iter()
-            .find(|curser| unsafe { curser.data().unwrap().as_ref().id() == task.id() })
+            .find(|t| unsafe { t.id() == task.id() })
             .ok_or(())?;
         res.remove();
         Ok(())

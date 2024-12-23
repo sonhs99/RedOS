@@ -3,7 +3,7 @@ use core::{arch::asm, hint::black_box};
 use log::debug;
 
 use crate::{
-    device::{block::pata::set_interrupt_flag, pci::msi, xhc::XHC},
+    device::{block::pata::set_interrupt_flag, pci::msi, ps2::keyboard::KEYBOARD, xhc::XHC},
     float::{clear_ts, fpu_init, fpu_load, fpu_save},
     interrupt::apic::LocalAPICRegisters,
     ioapic, println,
@@ -332,11 +332,14 @@ pub extern "C" fn break_point(stack_frame: &ExceptionStackFrame) {
 }
 
 pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
+    static mut count: usize = 0;
+    // debug!("[INTER]: XHCI Interrupt count={}", unsafe { count });
     if let Some(xhc) = XHC.get() {
         let _ = xhc.lock().process_all_event();
     }
     msi::increase_int_count(0);
     msi::load_balance_int(0);
+    unsafe { count += 1 };
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 
@@ -346,6 +349,18 @@ pub extern "C" fn apic_timer_handler(current_context: &mut Context) {
         // debug!("[TIMER] {:#X}", current_context.rip);
         schedule_int(current_context);
     }
+    LocalAPICRegisters::default().end_of_interrupt().notify();
+}
+
+pub extern "C" fn ps2_keyboard_handler(stack_frame: &ExceptionStackFrame) {
+    // println!("[INTER]: PS/2 Keyboard");
+    KEYBOARD.lock().get_data();
+    LocalAPICRegisters::default().end_of_interrupt().notify();
+}
+
+pub extern "C" fn ps2_mouse_handler(stack_frame: &ExceptionStackFrame) {
+    // println!("[INTER]: PS/2 Mouse");
+    KEYBOARD.lock().get_data();
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 

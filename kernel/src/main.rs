@@ -8,12 +8,16 @@ use alloc::{boxed::Box, format, string::String, vec::Vec};
 use core::{arch::asm, iter::empty, ptr::read_volatile, str};
 use kernel::console::alloc_window;
 use kernel::device::driver::mouse::{get_mouse_state, Mouse};
+use kernel::device::ps2::keyboard::init_ps2;
+use kernel::shell::start_shell;
 use kernel::task::idle::idle_task;
 use kernel::window::component::Button;
 use kernel::window::draw::{draw_rect, draw_str, Point};
 use kernel::window::event::{EventType, WindowEvent};
 use kernel::window::frame::WindowFrame;
-use kernel::window::{create_window, init_window, window_task, Drawable, Writable};
+use kernel::window::{
+    create_window, init_window, request_update_all_windows, window_task, Drawable, Writable,
+};
 
 use bootloader::{BootInfo, FrameBufferConfig, PixelFormat};
 use kernel::{
@@ -79,6 +83,12 @@ fn kernel_main(boot_info: BootInfo) {
     init_heap(&boot_info.memory_map);
     info!("Heap Initialized");
 
+    let keyboard = Keyboard::new();
+    let mouse = Mouse::new();
+
+    init_ps2(keyboard.ps2(), mouse.ps2());
+    info!("Enable PS/2 Keyboard and Mouse");
+
     init_task();
     info!("Task Management Initialized");
 
@@ -89,13 +99,6 @@ fn kernel_main(boot_info: BootInfo) {
     mount(ramdisk, "ram0", false);
     format_by_name("ram0", 8 * 1024 * 1024, false);
     info!("RAM Disk Mounted");
-
-    init_window((width, height));
-    create_task("window", TaskFlags::new(), None, window_task as u64, 0, 0);
-    let mut writer = WindowFrame::new_pos(0, 19, 640, 400, "Log");
-    writer.set_background(PixelColor::Black);
-    alloc_window(writer);
-    info!("Window Manager Initialized");
 
     // Do Not Use
     // set_ts();
@@ -139,18 +142,16 @@ fn kernel_main(boot_info: BootInfo) {
     // create_task(TaskFlags::new(), None, test as u64, 0, 0);
 
     let mut msi_vector: Vec<MSIEntry> = Vec::new();
-    match PciSearcher::new()
+    if let Some(xhci) = PciSearcher::new()
         .base(Base::Serial)
         .sub(Sub::USB)
         .interface(Interface::XHCI)
         .search()
-        .expect("No xHC device detected")
-        .first()
     {
-        Some(xhc_dev) => {
+        for (idx, xhc_dev) in xhci.iter().enumerate() {
             info!(
-                "xHC has been found: {}.{}.{}",
-                xhc_dev.bus, xhc_dev.dev, xhc_dev.func
+                "[{}] xHC has been found: {}.{}.{}",
+                idx, xhc_dev.bus, xhc_dev.dev, xhc_dev.func
             );
             let xhc_bar = xhc_dev.read_bar(0);
             info!("Read BAR0: 0x{xhc_bar:016X}");
@@ -184,8 +185,6 @@ fn kernel_main(boot_info: BootInfo) {
                 });
 
                 let mut allocator = Allocator::new();
-                let keyboard = Keyboard::new();
-                let mouse = Mouse::new();
                 let mut xhc: xhc::Controller<register::External, Allocator> = xhc::Controller::new(
                     xhc_mmio_base,
                     allocator,
@@ -195,20 +194,18 @@ fn kernel_main(boot_info: BootInfo) {
                 xhc.reset_port().expect("xHCI Port Reset Failed");
                 regist_controller(xhc);
             });
-            // create_task(TaskFlags::new(), None, print_input as u64, 0, 0);
         }
-        None => {}
+    } else {
+        info!("No xHC Device Found");
     }
 
-    match PciSearcher::new()
+    if let Some(ide) = PciSearcher::new()
         .base(Base::MassStorage)
         .sub(Sub::IDE)
         .interface(Interface::None)
         .search()
-        .expect("No IDE device detected")
-        .first()
     {
-        Some(ide_dev) => {
+        for (idx, ide_dev) in ide.iter().enumerate() {
             info!(
                 "IDE has been found: {}.{}.{}",
                 ide_dev.bus, ide_dev.dev, ide_dev.func
@@ -232,29 +229,37 @@ fn kernel_main(boot_info: BootInfo) {
                             }
                         }
 
-                        let root = open_dir(&dev_name, 0, "/", b"r")
-                            .expect("Attempt to Open Root Directory Failed");
-                        let mut count = 0;
-                        for (idx, entry) in root.entries() {
-                            info!("[{idx}] /{entry}");
-                            count += 1;
-                        }
-                        info!("Total {count} entries");
+                        // let root = open_dir(&dev_name, 0, "/", b"r")
+                        //     .expect("Attempt to Open Root Directory Failed");
+                        // let mut count = 0;
+                        // for (idx, entry) in root.entries() {
+                        //     info!("[{idx}] /{entry}");
+                        //     count += 1;
+                        // }
+                        // info!("Total {count} entries");
                     }
                 } else {
                     info!("PATA:{i} Not Detected");
                 }
             }
-            info!("List of Block I/O Device");
-            for (idx, dev_name) in dev_list().iter().enumerate() {
-                info!("[{idx}] {dev_name}");
-            }
+            // info!("List of Block I/O Device");
+            // for (idx, dev_name) in dev_list().iter().enumerate() {
+            //     info!("[{idx}] {dev_name}");
+            // }
             // create_task(TaskFlags::new(), None, test_fs as u64, 0, 0);
         }
-        None => {}
+    } else {
+        info!("No IDE Device Found");
     }
 
     init_routing_table(msi_vector);
+    init_window((width, height));
+    create_task("window", TaskFlags::new(), None, window_task as u64, 0, 0);
+    let mut writer = WindowFrame::new_pos(0, 19, 640, 400, "Log");
+    writer.set_background(PixelColor::Black);
+    alloc_window(writer);
+    create_task("shell", TaskFlags::new(), None, start_shell as u64, 0, 0);
+    request_update_all_windows();
     // create_task("ThreadTest", TaskFlags::new(), None, test as u64, 0, 0);
     idle_task();
 }

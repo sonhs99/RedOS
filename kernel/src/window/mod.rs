@@ -25,7 +25,7 @@ use writer::FrameBuffer;
 
 use crate::collections::queue::Queue;
 use crate::device::driver::keyboard::get_keystate_unblocked;
-use crate::device::driver::mouse::{get_mouse_state, get_mouse_state_unblocked};
+use crate::device::driver::mouse::get_mouse_state_unblocked;
 use crate::task::{create_task, TaskFlags};
 use crate::utility::abs;
 use crate::{
@@ -36,7 +36,7 @@ use crate::{
 
 pub use writer::WindowWriter;
 
-const MAX_QUEUE_ENQUEUE_COUNT: usize = 10;
+const MAX_QUEUE_ENQUEUE_COUNT: usize = 40;
 
 enum WindowComponent {
     Body,
@@ -213,7 +213,7 @@ impl DrawBitmap {
     pub fn set_point(&mut self, point: Point) {
         if self.area.is_in(point.0, point.1) {
             let local = Point(point.0 - self.area.x, point.1 - self.area.y);
-            let idx = point.0 + point.1 * self.area.width;
+            let idx = local.0 + local.1 * self.area.width;
             let offset = idx % 8;
             self.bitmap[idx / 8] |= 0x01 << (7 - offset);
         }
@@ -298,14 +298,12 @@ impl BitmapDrawable for Window {
             .chunks(self.width)
             .enumerate()
         {
-            if let Some(transparent) = self.transparent_color {
-                for x in area.x..area.x + area.width {
-                    let global_x = offset_x + area.x + x;
-                    let global_y = offset_y + area.y + y;
-                    if bitmap.point(Point(global_x, global_y)) {
-                        writer.write(global_x, global_y, chunk[x].into());
-                        bitmap.set_point(Point(global_x, global_y));
-                    }
+            for x in area.x..area.x + area.width {
+                let global_x = offset_x + area.x + x;
+                let global_y = offset_y + area.y + y;
+                if bitmap.point(Point(global_x, global_y)) {
+                    writer.write(global_x, global_y, chunk[x].into());
+                    // bitmap.set_point(Point(global_x, global_y));
                 }
             }
         }
@@ -406,7 +404,7 @@ impl BitmapDrawable for Layer {
                 writer,
             );
         }
-        // bitmap.mark_area(&my_area);
+        bitmap.mark_area(&my_area);
     }
 }
 
@@ -496,7 +494,7 @@ pub fn request_update_all_windows() {
     ));
 }
 
-fn process_mouse() {
+fn process_mouse() -> bool {
     if let Some(status) = get_mouse_state_unblocked() {
         // debug!("asdf");
         let mut manager = WINDOW_MANAGER.lock();
@@ -524,6 +522,7 @@ fn process_mouse() {
             if status.pressed(button) {
                 let changed = if button == 0 {
                     manager.focus(window_id);
+                    request_update_by_id(window_id);
                     match writer.get_area(local_x, local_y) {
                         WindowComponent::Title => {
                             is_button_changed = true;
@@ -563,7 +562,7 @@ fn process_mouse() {
                 if window_id == 0 && button == 0 {
                     create_task(
                         "WindowTest",
-                        TaskFlags::new(),
+                        TaskFlags::new().set_priority(66).clone(),
                         None,
                         test_window as u64,
                         0,
@@ -603,12 +602,16 @@ fn process_mouse() {
         //     .lock()
         //     .render_mouse(mouse_x, mouse_y, area, &mut get_graphic().lock());
         WINDOW_MANAGER.lock().set_mouse(Point(mouse_x, mouse_y));
-        request_update_by_area(area.union(&new_area));
-        request_update_all_windows();
+        request_update_by_area(new_area);
+        request_update_by_area(area);
+        // debug!("[WINDOW] x={mouse_x} y={mouse_y}");
+        // request_update_all_windows();
+        return true;
     }
+    false
 }
 
-fn process_keyboard() {
+fn process_keyboard() -> bool {
     if let Some(key) = get_keystate_unblocked() {
         let id = WINDOW_MANAGER.lock().top_layer().window.lock().id;
         let event = Event::new(
@@ -616,7 +619,9 @@ fn process_keyboard() {
             EventType::Keyboard(event::KeyEvent::Pressed(key)),
         );
         WINDOW_MANAGER.lock().top_layer().writer().push_event(event);
+        return true;
     }
+    false
 }
 
 fn process_window() {
@@ -625,37 +630,34 @@ fn process_window() {
     for _ in 0..MAX_QUEUE_ENQUEUE_COUNT {
         let result = WINDOW_MANAGER.lock().pop_event();
         if let Ok(event) = result {
-            match event.event() {
-                EventType::Update(update_event) => {
-                    update = true;
-                    match update_event {
-                        UpdateEvent::Id(id) => {
-                            if let Some(layer) = WINDOW_MANAGER.lock().get_layer(id) {
-                                layer.need_update();
-                                let area = layer.area();
-                                global_area = if let Some(a) = global_area {
-                                    Some(area.union(&a))
-                                } else {
-                                    Some(area)
-                                };
-                            }
-                        }
-                        UpdateEvent::Area(area) => {
+            if let EventType::Update(update_event) = event.event() {
+                update = true;
+                match update_event {
+                    UpdateEvent::Id(id) => {
+                        if let Some(layer) = WINDOW_MANAGER.lock().get_layer(id) {
+                            layer.need_update();
+                            let area = layer.area();
                             global_area = if let Some(a) = global_area {
                                 Some(area.union(&a))
                             } else {
                                 Some(area)
                             };
                         }
-                        UpdateEvent::All => {
-                            let mut manager = WINDOW_MANAGER.lock();
-                            // let area = manager.area();
-                            manager.request_global_update();
-                            // global_area = Some(manager.area());
-                        }
+                    }
+                    UpdateEvent::Area(area) => {
+                        global_area = if let Some(a) = global_area {
+                            Some(area.union(&a))
+                        } else {
+                            Some(area)
+                        };
+                    }
+                    UpdateEvent::All => {
+                        let mut manager = WINDOW_MANAGER.lock();
+                        // let area = manager.area();
+                        manager.request_global_update();
+                        global_area = Some(manager.area());
                     }
                 }
-                _ => {}
             }
         } else {
             break;
@@ -671,9 +673,14 @@ fn process_window() {
 }
 
 pub fn window_task() {
+    let mut count = 0;
     loop {
-        process_mouse();
-        process_keyboard();
+        let mouse = process_mouse();
+        let keyboard = process_keyboard();
         process_window();
+        if mouse || keyboard {
+            debug!("Mouse={mouse}, Keyboard={keyboard}");
+            count += 1;
+        }
     }
 }

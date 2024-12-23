@@ -207,23 +207,55 @@ impl WindowManager {
 
     fn render_inner(&mut self, area: &Area, writer: &mut impl Writable) {
         let mut flag = self.update;
-        let mut area = area.clone();
+        // let mut area = area.clone();
         // let mut bitmap = DrawBitmap::new(area.clone());
         for layer_id in self.stack.iter() {
             let layer = self.layers.get_mut(layer_id).expect("Not Found");
             let update_flag = layer.take_update();
             flag = flag || update_flag;
             if flag {
-                layer.draw(0, 0, &area, &mut self.global);
+                layer.draw(0, 0, area, &mut self.global);
             }
-            // layer.bitmap_draw(0, 0, area, &mut bitmap, writer);
+            // layer.bitmap_draw(0, 0, area, &mut bitmap, &mut self.global);
+        }
+        self.update = false;
+        print_curser(self.mouse_x, self.mouse_y, &mut self.global);
+    }
+
+    fn render_window(&mut self, id: usize, writer: &mut impl Writable) {
+        let mut area: Option<Area> = None;
+        for layer_id in self.stack.iter() {
+            let layer = self.layers.get_mut(layer_id).expect("Not Found");
+            if layer_id == id {
+                area = Some(layer.area());
+            }
+            if let Some(ref area) = area {
+                layer.draw(0, 0, area, &mut self.global);
+            }
+        }
+        self.update = false;
+        print_curser(self.mouse_x, self.mouse_y, &mut self.global);
+    }
+
+    fn render_area(&mut self, area: &Area, writer: &mut impl Writable) {
+        let mut flag = self.update;
+        // let mut area = area.clone();
+        // let mut bitmap = DrawBitmap::new(area.clone());
+        for layer_id in self.stack.iter() {
+            let layer = self.layers.get_mut(layer_id).expect("Not Found");
+            let update_flag = layer.take_update();
+            flag = flag || update_flag;
+            if flag {
+                layer.draw(0, 0, area, &mut self.global);
+            }
+            // layer.bitmap_draw(0, 0, area, &mut bitmap, &mut self.global);
         }
         self.update = false;
         print_curser(self.mouse_x, self.mouse_y, &mut self.global);
     }
 
     pub fn render(&mut self, area: &Area, writer: &mut impl Writable) {
-        self.render_inner(&area, writer);
-        self.global.draw(0, 0, area, writer);
+        self.render_inner(area, writer);
+        self.global.draw(0, 0, &self.area(), writer);
     }
 }

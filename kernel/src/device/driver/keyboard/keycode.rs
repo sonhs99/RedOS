@@ -1,5 +1,5 @@
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum KeySpecial {
     None = 0x00,
     Enter = b'\n',
@@ -77,4 +77,10 @@ impl KeyMappingEntry {
     pub fn combined(&self) -> Key {
         self.1
     }
+}
+
+pub trait Keycode: Clone + Copy {
+    fn is_alpha(&self) -> bool;
+    fn is_common_num(&self) -> bool;
+    fn is_num_pad(&self) -> bool;
 }

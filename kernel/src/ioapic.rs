@@ -40,62 +40,62 @@ pub fn init() -> usize {
             0 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<LocalAPICEntry>() };
                 num_core += 1;
-                // debug!(
-                //     "MADT Entry {}: Local APIC, id={} flags={:#X}",
-                //     idx,
-                //     entry.id,
-                //     unsafe { read_unaligned(addr_of!(entry.flags)) }
-                // );
+                debug!(
+                    "MADT Entry {}: Local APIC, id={} flags={:#X}",
+                    idx,
+                    entry.id,
+                    unsafe { read_unaligned(addr_of!(entry.flags)) }
+                );
             }
             1 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<IOAPICEntry>() };
                 ioapic.get_or_init(|| IOAPICRegister::new(entry.address));
-                // debug!(
-                //     "MADT Entry {}: I/O APIC, id={} addr={:#X} global_addr={}",
-                //     idx,
-                //     entry.id,
-                //     unsafe { read_unaligned(addr_of!(entry.address)) },
-                //     unsafe { read_unaligned(addr_of!(entry.global_addr)) }
-                // );
+                debug!(
+                    "MADT Entry {}: I/O APIC, id={} addr={:#X} global_addr={}",
+                    idx,
+                    entry.id,
+                    unsafe { read_unaligned(addr_of!(entry.address)) },
+                    unsafe { read_unaligned(addr_of!(entry.global_addr)) }
+                );
             }
             2 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<IntOverrideEntry>() };
                 let int = unsafe { read_unaligned(addr_of!(entry.global_int)) } as u8;
                 let flags = unsafe { read_unaligned(addr_of!(entry.flags)) };
 
-                // debug!(
-                //     "MADT Entry {}: Interrupt Override, bus={} src={} glo={} flags={:#X}",
-                //     idx, entry.bus, entry.source, int, flags
-                // );
+                debug!(
+                    "MADT Entry {}: Interrupt Override, bus={} src={} glo={} flags={:#X}",
+                    idx, entry.bus, entry.source, int, flags
+                );
                 redirection_table[int as usize].src = entry.source;
                 redirection_table[int as usize].flags = flags as u8;
             }
             3 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<IntNMIOverrideEntry>() };
-                // debug!(
-                //     "MADT Entry {}: NMI Override, int={} flags={:#X}",
-                //     idx,
-                //     unsafe { read_unaligned(addr_of!(entry.global_int)) },
-                //     unsafe { read_unaligned(addr_of!(entry.flags)) }
-                // );
+                debug!(
+                    "MADT Entry {}: NMI Override, int={} flags={:#X}",
+                    idx,
+                    unsafe { read_unaligned(addr_of!(entry.global_int)) },
+                    unsafe { read_unaligned(addr_of!(entry.flags)) }
+                );
             }
             4 => {
                 let entry =
                     unsafe { &*(entry as *const MADTHeader).cast::<LocalNMIOverideEntry>() };
-                // debug!(
-                //     "MADT Entry {}: Local NMI Override, int={} flags={:#X}",
-                //     idx,
-                //     entry.int,
-                //     unsafe { read_unaligned(addr_of!(entry.flags)) }
-                // );
+                debug!(
+                    "MADT Entry {}: Local NMI Override, int={} flags={:#X}",
+                    idx,
+                    entry.int,
+                    unsafe { read_unaligned(addr_of!(entry.flags)) }
+                );
             }
             5 => {
                 let entry = unsafe { &*(entry as *const MADTHeader).cast::<LocalOverrideEntry>() };
-                // debug!(
-                //     "MADT Entry {}: Local Int Override, addr={:#X}",
-                //     idx,
-                //     unsafe { read_unaligned(addr_of!(entry.address)) },
-                // );
+                debug!(
+                    "MADT Entry {}: Local Int Override, addr={:#X}",
+                    idx,
+                    unsafe { read_unaligned(addr_of!(entry.address)) },
+                );
             }
             _ => {}
         }

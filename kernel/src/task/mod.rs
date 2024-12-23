@@ -151,7 +151,8 @@ pub fn create_task(
     let apic_id = LocalAPICRegisters::default().local_apic_id().id();
     without_interrupts(|| {
         let mut manager = TASK_MANAGER.lock();
-        let mut scheduler = SCHEDULER[apic_id as usize].skip().lock();
+        let mut scheduler: crate::sync::MutexGuard<'_, PriorityRoundRobinScheduler> =
+            SCHEDULER[apic_id as usize].skip().lock();
         let task = manager.allocate()?;
         let mut parent_task = scheduler.running_task();
 
@@ -178,13 +179,6 @@ pub fn create_task(
         if let Some(ref mut parent) = parent_task {
             task.set_sibling(parent.child().as_deref());
             parent.set_child(Some(task));
-            // debug!(
-            //     "P={},C={},S={:?}",
-            //     parent.id(),
-            //     task.id(),
-            //     task.sibling()
-            //         .and_then(|task| unsafe { Some(task.as_ref().id()) })
-            // );
         }
         task.set_parent(parent_task.as_deref());
 

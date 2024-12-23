@@ -1,4 +1,5 @@
 use log::debug;
+use ps2::PS2MouseDriver;
 use usb::USBMouseDriver;
 
 use crate::{
@@ -7,6 +8,7 @@ use crate::{
     task::schedule,
 };
 
+pub mod ps2;
 pub mod usb;
 
 const MOUSE_BUFFER_LENGTH: usize = 200;
@@ -75,9 +77,20 @@ impl Mouse {
 
     pub fn usb(&self) -> USBMouseDriver {
         USBMouseDriver::new(|pressed, released, x_v, y_v, z_v| unsafe {
+            // debug!("Mouse x_v={x_v}, y_v={y_v}, z_v={z_v}");
             let _ = QUEUE.skip().lock().enqueue(MouseState::new(
                 pressed, released, x_v as i16, y_v as i16, z_v as i16,
             ));
+        })
+    }
+    pub fn ps2(&self) -> PS2MouseDriver {
+        PS2MouseDriver::new(|pressed, x_v, y_v| unsafe {
+            // debug!("Mouse press={pressed:08b} x_v={x_v}, y_v={y_v}");
+            let _ =
+                QUEUE
+                    .skip()
+                    .lock()
+                    .enqueue(MouseState::new(pressed, !pressed & 0x07, x_v, y_v, 0));
         })
     }
 }

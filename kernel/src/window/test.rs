@@ -73,13 +73,15 @@ pub fn test_window() {
 
     let mut pressed = 0;
     let mut released = 0;
+    let mut c_x = 0;
+    let mut c_y = 0;
     loop {
         let current_id = LocalAPICRegisters::default().local_apic_id().id();
         if apic_id != current_id {
             apic_id = current_id;
             draw_str(
-                Point(16, 17),
-                &format!("APIC ID: {apic_id}"),
+                Point(88, 17),
+                &format!("{apic_id}"),
                 PixelColor::Black,
                 PixelColor::White,
                 &mut body,
@@ -113,19 +115,30 @@ pub fn test_window() {
                         }
                     };
                     draw_str(
-                        Point(16, 33),
-                        &format!("Mouse Event: {str:10}:{value:3}"),
+                        Point(120, 33),
+                        &format!("{str:10}:{value:3}"),
                         PixelColor::Black,
                         PixelColor::White,
                         &mut body,
                     );
-                    draw_str(
-                        Point(16, 49),
-                        &format!("Data: X = {x:3}, Y = {y:3}"),
-                        PixelColor::Black,
-                        PixelColor::White,
-                        &mut body,
-                    );
+                    if x != c_x || y != c_y {
+                        draw_str(
+                            Point(88, 49),
+                            &format!("{x:3}"),
+                            PixelColor::Black,
+                            PixelColor::White,
+                            &mut body,
+                        );
+                        draw_str(
+                            Point(144, 49),
+                            &format!("{y:3}"),
+                            PixelColor::Black,
+                            PixelColor::White,
+                            &mut body,
+                        );
+                        c_x = x;
+                        c_y = y;
+                    }
                 }
                 EventType::Window(e) => match e {
                     WindowEvent::Close => {
