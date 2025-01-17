@@ -84,13 +84,12 @@ impl Mouse {
         })
     }
     pub fn ps2(&self) -> PS2MouseDriver {
-        PS2MouseDriver::new(|pressed, x_v, y_v| unsafe {
+        PS2MouseDriver::new(|pressed, released, x_v, y_v| unsafe {
             // debug!("Mouse press={pressed:08b} x_v={x_v}, y_v={y_v}");
-            let _ =
-                QUEUE
-                    .skip()
-                    .lock()
-                    .enqueue(MouseState::new(pressed, !pressed & 0x07, x_v, y_v, 0));
+            let _ = QUEUE
+                .skip()
+                .lock()
+                .enqueue(MouseState::new(pressed, released, x_v, y_v, 0));
         })
     }
 }

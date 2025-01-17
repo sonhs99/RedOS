@@ -679,7 +679,7 @@ pub fn window_task() {
         let keyboard = process_keyboard();
         process_window();
         if mouse || keyboard {
-            debug!("Mouse={mouse}, Keyboard={keyboard}");
+            // debug!("Mouse={mouse}, Keyboard={keyboard}");
             count += 1;
         }
     }

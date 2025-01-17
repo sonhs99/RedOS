@@ -1,5 +1,8 @@
+use log::debug;
+
 use crate::{
     device::driver::{keyboard::ps2::PS2KeyboardDriver, mouse::ps2::PS2MouseDriver},
+    interrupt::without_interrupts,
     sync::{Mutex, OnceLock},
 };
 
@@ -36,7 +39,7 @@ impl Keyboard {
     }
 
     fn is_mouse_data_in_buffer(&self) -> bool {
-        self.state.in8() & 0x20 != 0
+        (self.state.in8() & 0x20) != 0
     }
 
     fn is_input_buffer_full(&self) -> bool {
@@ -54,10 +57,11 @@ impl Keyboard {
                     break;
                 }
             }
+            let is_mouse = self.is_mouse_data_in_buffer();
             let data = self.output_buffer.in8();
             if data == 0xFA {
                 return Ok(());
-            } else if self.is_mouse_data_in_buffer() {
+            } else if is_mouse {
                 self.mouse_driver.on_data_received(data);
             } else {
                 self.keyboard_driver.on_data_received(data);
@@ -93,10 +97,13 @@ impl Keyboard {
 
     pub fn get_data(&mut self) {
         if self.is_output_buffer_full() {
-            let data = self.output_buffer.in8();
             if self.is_mouse_data_in_buffer() {
+                let data = self.output_buffer.in8();
+                // debug!("mouse {data:02X}");
                 self.mouse_driver.on_data_received(data);
             } else {
+                let data = self.output_buffer.in8();
+                // debug!("keyboard {data:02X}");
                 self.keyboard_driver.on_data_received(data);
             }
         }
@@ -157,8 +164,10 @@ pub fn init_ps2(keyboard_driver: PS2KeyboardDriver, mouse_driver: PS2MouseDriver
             ))
         })
         .lock();
-    keyboard.activate_keyboard();
-    keyboard.activate_mouse();
+    without_interrupts(|| {
+        keyboard.activate_keyboard();
+        keyboard.activate_mouse();
+    });
 }
 
 pub fn change_keyboard_led(capslock: bool, numlock: bool, scrolllock: bool) {

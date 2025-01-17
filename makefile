@@ -12,6 +12,8 @@ QEMU_TRACE := --trace "usb_xhci*"
 
 QEMU_DEBUG := -S -gdb tcp::9000
 
+.PHONY: build run trace dump hdd clean
+
 esp/ap_bootstrap.bin: ap_bootstrap/entry.s
 	nasm -o ./esp/ap_bootstrap.bin ./ap_bootstrap/entry.s
 
@@ -52,3 +54,4 @@ debug:
 
 clean:
 	rm -rf target
+	rm -rf esp

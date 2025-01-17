@@ -151,8 +151,6 @@ where
         transfer_event: TransferEvent,
         target_event: TargetEvent,
     ) -> Result<(), ()> {
-        // debug!("transfer: {transfer_event:?}");
-        // debug!("target: {target_event:?}");
         let slot_id = transfer_event.slot_id();
         let is_init =
             self.device_manager

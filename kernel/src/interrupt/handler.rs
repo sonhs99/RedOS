@@ -332,14 +332,14 @@ pub extern "C" fn break_point(stack_frame: &ExceptionStackFrame) {
 }
 
 pub extern "C" fn xhc_handler(stack_frame: &ExceptionStackFrame) {
-    static mut count: usize = 0;
+    // static mut count: usize = 0;
     // debug!("[INTER]: XHCI Interrupt count={}", unsafe { count });
     if let Some(xhc) = XHC.get() {
         let _ = xhc.lock().process_all_event();
     }
     msi::increase_int_count(0);
     msi::load_balance_int(0);
-    unsafe { count += 1 };
+    // unsafe { count += 1 };
     LocalAPICRegisters::default().end_of_interrupt().notify();
 }
 

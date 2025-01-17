@@ -83,12 +83,6 @@ fn kernel_main(boot_info: BootInfo) {
     init_heap(&boot_info.memory_map);
     info!("Heap Initialized");
 
-    let keyboard = Keyboard::new();
-    let mouse = Mouse::new();
-
-    init_ps2(keyboard.ps2(), mouse.ps2());
-    info!("Enable PS/2 Keyboard and Mouse");
-
     init_task();
     info!("Task Management Initialized");
 
@@ -135,6 +129,14 @@ fn kernel_main(boot_info: BootInfo) {
     }
 
     // loop {}
+
+    info!("Device Init Start");
+
+    let keyboard = Keyboard::new();
+    let mouse = Mouse::new();
+
+    init_ps2(keyboard.ps2(), mouse.ps2());
+    info!("Enable PS/2 Keyboard and Mouse");
 
     info!("PCI Init Started");
     init_pci();

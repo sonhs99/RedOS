@@ -252,6 +252,10 @@ impl PS2KeyboardDriver {
             return Err(());
         }
 
+        // if (down_scan_code as usize) > KEY_MAPPING_TABLE.len() {
+        //     return Err(());
+        // }
+
         let key = if self.manager.is_combined_code(scan_code, self.shift_pressed) {
             KEY_MAPPING_TABLE[down_scan_code as usize].combined()
         } else {

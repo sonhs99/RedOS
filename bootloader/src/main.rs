@@ -77,11 +77,11 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .unwrap();
         copy_load_segment(&elf_file);
 
-        info!("[KERNEL    ] Range: 0x{kernel_first_addr:08X} - 0x{kernel_last_addr:08X}");
+        info!("[KERNEL] Range: 0x{kernel_first_addr:08X} - 0x{kernel_last_addr:08X}");
         let header = elf_file.get_header();
-        info!("[KERNEL    ] Entry Point: 0x{:08X}", header.e_entry);
-        info!("[KERNEL    ] Type: 0x{:04X}", header.e_type);
-        info!("[KERNEL    ] Pages: {}", num_page);
+        info!("[KERNEL] Entry Point: 0x{:08X}", header.e_entry);
+        info!("[KERNEL] Type: 0x{:04X}", header.e_type);
+        info!("[KERNEL] Pages: {}", num_page);
 
         let kernel_entry_point = header.e_entry;
 
@@ -99,8 +99,8 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         )
         .unwrap();
 
-        info!("[STACK     ] Range: 0x{stack_start_addr:08X} - 0x{stack_last_addr:08X}");
-        info!("[STACK     ] Pages: {}", stack_size / 0x1000);
+        info!("[STACK] Range: 0x{stack_start_addr:08X} - 0x{stack_last_addr:08X}");
+        info!("[STACK] Pages: {}", stack_size / 0x1000);
 
         // IST
 
@@ -113,8 +113,8 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
             stack_size as usize / 0x1000,
         )
         .unwrap();
-        info!("[IST       ] Range: 0x{ist_start_addr:08X} - 0x{ist_last_addr:08X}");
-        info!("[IST       ] Pages: {}", ist_size / 0x1000);
+        info!("[IST  ] Range: 0x{ist_start_addr:08X} - 0x{ist_last_addr:08X}");
+        info!("[IST  ] Pages: {}", ist_size / 0x1000);
 
         // Trampoline Load
         let ap_bootstrap = match root_dir.open(
@@ -144,11 +144,11 @@ fn main(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
                 });
 
                 info!(
-                    "[TRAMPOLINE] Range: 0x{:08X} - 0x{:08X}",
+                    "[TRAMP] Range: 0x{:08X} - 0x{:08X}",
                     ap_base_addr,
                     ap_base_addr + ap_file_size as u64
                 );
-                info!("[TRAMPOLINE] Pages: {}", num_page);
+                info!("[TRAMP] Pages: {}", num_page);
                 Some(ap_base_addr as u32)
             }
             Err(_) => {

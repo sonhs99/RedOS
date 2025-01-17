@@ -226,7 +226,7 @@ impl WindowManager {
         let mut area: Option<Area> = None;
         for layer_id in self.stack.iter() {
             let layer = self.layers.get_mut(layer_id).expect("Not Found");
-            if layer_id == id {
+            if *layer_id == id {
                 area = Some(layer.area());
             }
             if let Some(ref area) = area {

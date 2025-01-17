@@ -38,10 +38,10 @@ impl USBMouseDriver {
 
 impl ClassDriverOperate for USBMouseDriver {
     fn on_data_received(&mut self) -> Result<(), ()> {
-        // debug!("Mouse");
         let state = self.buffer[0] as u8;
         let pressed = !self.prev_state & state;
         let released = self.prev_state & !state;
+        debug!("Mouse {:02X?}", self.buffer);
         self.subscribe.subscribe(
             pressed,
             released,

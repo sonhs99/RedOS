@@ -305,7 +305,7 @@ impl USBKeyboardDriver {
 
 impl ClassDriverOperate for USBKeyboardDriver {
     fn on_data_received(&mut self) -> Result<(), ()> {
-        // debug!("Keyboard");
+        debug!("Keyboard {:02X?}", self.data_buff);
         for key in self.keycodes().iter() {
             self.manager.update_key_status(key);
             self.subsrcribe.subscribe(self.data_buff[0], *key);
