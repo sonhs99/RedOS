@@ -14,9 +14,8 @@ pub mod usb;
 const MOUSE_BUFFER_LENGTH: usize = 200;
 const MAX_SKIP_MOUSE_EVENT: usize = 20;
 
-static QUEUE: Mark<Mutex<Queue<[MouseState; MOUSE_BUFFER_LENGTH]>>> = Mark::new(Mutex::new(
-    Queue::new([MouseState::empty(); MOUSE_BUFFER_LENGTH]),
-));
+static QUEUE: Mutex<Queue<[MouseState; MOUSE_BUFFER_LENGTH]>> =
+    Mutex::new(Queue::new([MouseState::empty(); MOUSE_BUFFER_LENGTH]));
 
 #[derive(Clone, Copy)]
 pub struct MouseState {
@@ -78,7 +77,7 @@ impl Mouse {
     pub fn usb(&self) -> USBMouseDriver {
         USBMouseDriver::new(|pressed, released, x_v, y_v, z_v| unsafe {
             // debug!("Mouse x_v={x_v}, y_v={y_v}, z_v={z_v}");
-            let _ = QUEUE.skip().lock().enqueue(MouseState::new(
+            let _ = QUEUE.lock().enqueue(MouseState::new(
                 pressed, released, x_v as i16, y_v as i16, z_v as i16,
             ));
         })
@@ -87,7 +86,6 @@ impl Mouse {
         PS2MouseDriver::new(|pressed, released, x_v, y_v| unsafe {
             // debug!("Mouse press={pressed:08b} x_v={x_v}, y_v={y_v}");
             let _ = QUEUE
-                .skip()
                 .lock()
                 .enqueue(MouseState::new(pressed, released, x_v, y_v, 0));
         })
@@ -96,11 +94,11 @@ impl Mouse {
 
 pub fn get_mouse_state() -> MouseState {
     let mut state = MouseState::empty();
-    while QUEUE.skip().lock().is_empty() {
+    while QUEUE.lock().is_empty() {
         schedule();
     }
     for _ in 0..MAX_SKIP_MOUSE_EVENT {
-        let res = QUEUE.skip().lock().dequeue();
+        let res = QUEUE.lock().dequeue();
         match res {
             Ok(current) => {
                 state.x_v += current.x_v;
@@ -120,12 +118,12 @@ pub fn get_mouse_state() -> MouseState {
 }
 
 pub fn get_mouse_state_unblocked() -> Option<MouseState> {
-    if QUEUE.skip().lock().is_empty() {
+    if QUEUE.lock().is_empty() {
         None
     } else {
         let mut state = MouseState::empty();
         for _ in 0..MAX_SKIP_MOUSE_EVENT {
-            let res = QUEUE.skip().lock().dequeue();
+            let res = QUEUE.lock().dequeue();
             match res {
                 Ok(current) => {
                     state.x_v += current.x_v;

@@ -635,7 +635,6 @@ fn process_window() {
                 match update_event {
                     UpdateEvent::Id(id) => {
                         if let Some(layer) = WINDOW_MANAGER.lock().get_layer(id) {
-                            layer.need_update();
                             let area = layer.area();
                             global_area = if let Some(a) = global_area {
                                 Some(area.union(&a))
@@ -653,7 +652,6 @@ fn process_window() {
                     }
                     UpdateEvent::All => {
                         let mut manager = WINDOW_MANAGER.lock();
-                        // let area = manager.area();
                         manager.request_global_update();
                         global_area = Some(manager.area());
                     }
@@ -673,14 +671,14 @@ fn process_window() {
 }
 
 pub fn window_task() {
-    let mut count = 0;
+    // let mut count = 0;
     loop {
         let mouse = process_mouse();
         let keyboard = process_keyboard();
         process_window();
-        if mouse || keyboard {
-            // debug!("Mouse={mouse}, Keyboard={keyboard}");
-            count += 1;
-        }
+        // if mouse || keyboard {
+        //     // debug!("Mouse={mouse}, Keyboard={keyboard}");
+        //     count += 1;
+        // }
     }
 }

@@ -27,6 +27,7 @@ pub mod percpu;
 pub mod shell;
 mod sync;
 pub mod task;
+// pub mod tests;
 pub mod timer;
 pub mod utility;
 pub mod window;
